@@ -122,7 +122,8 @@
     </div>
     <div class="blk" id="drawblk"><div class="cap">input — draw here (28×28)</div>
       <canvas id="draw" width="168" height="168"></canvas></div>
-    <div class="blk" id="lookblk"><div class="cap">where CLS looks — 49 attention weights → 7×7 overlay · click a colour to toggle its head</div>
+    <div class="blk" id="lookblk"><div class="cap">where CLS looks — 49 attention weights → 7×7 overlay · click a colour to toggle its head<br>
+      <span id="lookinfo" style="color:#ff7ad9">hover a patch to trace it through the whole network</span></div>
       <canvas id="overlay" class="hm" width="168" height="168"></canvas>
       <div class="hrow" id="hleg" style="margin-top:4px"></div></div>
     <div class="blk" id="patchblk"><div class="cap">49 patches (4×4 px each)</div>
@@ -253,6 +254,9 @@ function paintPatches(){
       ctx.fillStyle=`rgb(${g},${g},${g})`;
       ctx.fillRect(gc*S2+c*S2/PP,gr*S2+r*S2/PP,S2/PP,S2/PP);}
     ctx.strokeStyle='#2a3441';ctx.strokeRect(gc*S2,gr*S2,S2,S2);}
+  if(tokenHL>0){const p=tokenHL-1;
+    ctx.strokeStyle='#ff7ad9';ctx.lineWidth=2;
+    ctx.strokeRect((p%G)*S2+1,((p/G)|0)*S2+1,S2-2,S2-2);ctx.lineWidth=1;}
 }
 function paintAttn(){
   for(let h=0;h<4;h++){
@@ -263,6 +267,10 @@ function paintAttn(){
       ctx.fillStyle=acolStr(R.A[h][i][j],1);
       ctx.fillRect(j*cw,i*ch,Math.ceil(cw),Math.ceil(ch));}
     ctx.strokeStyle='#ffd16688';ctx.strokeRect(0,0,cv.width,ch*1.4);   // CLS row marker
+    if(tokenHL>0){                                                    // trace token's row + column
+      ctx.strokeStyle='#ff7ad9';ctx.lineWidth=1.4;
+      ctx.strokeRect(0.5,tokenHL*ch,cv.width-1,ch);
+      ctx.strokeRect(tokenHL*cw,0.5,cw,cv.height-1);ctx.lineWidth=1;}
   }
 }
 function paintBars(){
@@ -303,7 +311,47 @@ function paintOverlay(){
   ctx.strokeStyle='#2a3441';
   for(let k=1;k<G;k++){ctx.beginPath();ctx.moveTo(k*PS,0);ctx.lineTo(k*PS,cv.height);
     ctx.moveTo(0,k*PS);ctx.lineTo(cv.width,k*PS);ctx.stroke();}
+  if(tokenHL>0){const p=tokenHL-1;
+    ctx.strokeStyle='#ff7ad9';ctx.lineWidth=2.5;
+    ctx.strokeRect((p%G)*PS+1,((p/G)|0)*PS+1,PS-2,PS-2);ctx.lineWidth=1;}
 }
+/* --- patch trace: hover a patch -> highlight its token everywhere in the network --- */
+let tokenHL=-1, tokenHLSet=null;
+function buildTokenSet(t){
+  const S=new Set();
+  const add=id=>{if(id!==undefined)S.add(id);};
+  ['tok','posed','normed','Q','K','V','attnOut','resid'].forEach(g=>{
+    for(let d=0;d<4;d++)add(byKeyN[g+'|'+t+'|'+d]);});
+  for(let h=0;h<4;h++)for(let j=0;j<T;j++){
+    add(byKeyN['attn'+h+'|'+t+'|'+j]);   // its row: where token t looks
+    add(byKeyN['attn'+h+'|'+j+'|'+t]);   // its column: who looks at token t
+  }
+  return S;
+}
+function setTokenHL(t){
+  if(t===tokenHL)return;
+  tokenHL=t; tokenHLSet=(t>0)?buildTokenSet(t):null;
+  const info=document.getElementById('lookinfo');
+  if(t>0){
+    const p=t-1, a=[0,1,2,3].map(h=>(R.A[h][0][t]*100).toFixed(0));
+    info.innerHTML=`patch (${(p/G)|0},${p%G}) = token ${t} — pink everywhere it flows · CLS attends `+
+      a.map((v,h)=>`<span style="color:${HEADCOL[h]}">${v}%</span>`).join(' / ');
+  } else info.textContent='hover a patch to trace it through the whole network';
+  paintPatches(); paintOverlay(); paintAttn(); applyStepColors();
+}
+function patchHover(cv){
+  cv.style.cursor='crosshair';
+  cv.addEventListener('pointermove',ev=>{
+    const b=cv.getBoundingClientRect();
+    const c=Math.min(G-1,Math.max(0,Math.floor((ev.clientX-b.left)/b.width*G)));
+    const r=Math.min(G-1,Math.max(0,Math.floor((ev.clientY-b.top)/b.height*G)));
+    setTokenHL(1+r*G+c);
+  });
+  cv.addEventListener('pointerleave',()=>setTokenHL(-1));
+}
+patchHover(document.getElementById('overlay'));
+patchHover(document.getElementById('patches'));
+
 const hleg=document.getElementById('hleg');
 HEADCOL.forEach((c,h)=>{
   const s=document.createElement('span');
@@ -803,7 +851,7 @@ let stepIdx=0,tick=0;
 let hoverId=-1,hoverContribs=null;
 const camPos=new THREE.Vector3(),camTgt=new THREE.Vector3();
 const white=new THREE.Color(0xffe9a8),bgc=new THREE.Color(0x11161d),tmpc=new THREE.Color();
-const cyanC=new THREE.Color(0x7fd7ff);
+const cyanC=new THREE.Color(0x7fd7ff),pinkC=new THREE.Color(0xff7ad9);
 function applyStepColors(){
   if(!meshN)return;
   const st=STEPS[stepIdx],fs=st.focus===null?null:new Set(st.focus);
@@ -813,6 +861,7 @@ function applyStepColors(){
     tmpc.copy(cellsN[i].base);
     if(fs&&!fs.has(cellsN[i].meta.g))tmpc.lerp(bgc,0.86);
     if(hl&&hl.has(i))tmpc.copy(cellsN[i].base).lerp(white,0.75);
+    if(tokenHLSet&&tokenHLSet.has(i))tmpc.copy(cellsN[i].base).lerp(pinkC,0.7);
     if(hoverContribs&&hoverContribs.has(i))tmpc.copy(cellsN[i].base).lerp(cyanC,0.7);
     if(i===hoverId)tmpc.setRGB(1,1,1);
     meshN.setColorAt(i,tmpc);}
