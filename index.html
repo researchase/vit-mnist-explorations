@@ -126,8 +126,8 @@
       <span id="lookinfo" style="color:#ff7ad9">hover a patch to trace it through the whole network</span></div>
       <canvas id="overlay" class="hm" width="168" height="168"></canvas>
       <div class="hrow" id="hleg" style="margin-top:4px"></div></div>
-    <div class="blk" id="patchblk"><div class="cap">49 patches (4×4 px each)</div>
-      <canvas id="patches" class="hm" width="140" height="140"></canvas></div>
+    <div class="blk" id="patchblk"><div class="cap">49 patches — watch one unwrap into 16 values → 4 numbers · hover to pause &amp; trace</div>
+      <canvas id="patches" class="hm" width="140" height="196"></canvas></div>
     <div class="blk" id="attnblk"><div class="cap">attention · CLS row emphasized · 50×50</div>
       <div class="hrow">
         <div class="hcell" id="hc0"><span>h0</span><canvas id="A0" class="hm" width="64" height="64"></canvas></div>
@@ -248,6 +248,7 @@ function paintDraw(){
 }
 function paintPatches(){
   const cv=document.getElementById('patches'),ctx=cv.getContext('2d'),S2=cv.width/G;
+  ctx.clearRect(0,0,cv.width,cv.height);
   for(let gr=0;gr<G;gr++)for(let gc=0;gc<G;gc++){
     for(let r=0;r<PP;r++)for(let c=0;c<PP;c++){
       const g=px[(gr*PP+r)*28+(gc*PP+c)];
@@ -257,6 +258,57 @@ function paintPatches(){
   if(tokenHL>0){const p=tokenHL-1;
     ctx.strokeStyle='#ff7ad9';ctx.lineWidth=2;
     ctx.strokeRect((p%G)*S2+1,((p/G)|0)*S2+1,S2-2,S2-2);ctx.lineWidth=1;}
+}
+
+/* --- looping animation: image -> breaks into patches -> one patch unwraps -> 4 numbers --- */
+let unwrapIdx=24, patchAnimT=0;
+function computeUnwrap(){                    // pick the inkiest patch to star in the animation
+  let best=0,bi=24;
+  for(let p=0;p<NP;p++){
+    const gr=(p/G)|0,gc=p%G;let s=0;
+    for(let r=0;r<PP;r++)for(let c=0;c<PP;c++)s+=px[(gr*PP+r)*28+(gc*PP+c)];
+    if(s>best){best=s;bi=p;}}
+  unwrapIdx=bi;
+}
+const easeIO=u=>u<=0?0:u>=1?1:u*u*(3-2*u);
+function paintPatchesAnim(tsec){
+  const cv=document.getElementById('patches'),ctx=cv.getContext('2d');
+  const W=cv.width, PS=W/G, S2=PS/PP;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const DUR=5.2, t=tsec%DUR;
+  const spread=easeIO((t-0.7)/0.8);          // 0.7–1.5s: grid cracks apart
+  const fly=easeIO((t-1.7)/1.1);             // 1.7–2.8s: chosen patch unwraps to a strip
+  const showE=easeIO((t-3.1)/0.5);           // 3.1s+: xW+b -> 4 numbers fade in
+  const gap=spread*2.0;
+  const u=unwrapIdx, ugr=(u/G)|0, ugc=u%G;
+  for(let gr=0;gr<G;gr++)for(let gc=0;gc<G;gc++){
+    const ox=(gc-(G-1)/2)*gap, oy=(gr-(G-1)/2)*gap;
+    const isU=(gr===ugr&&gc===ugc);
+    for(let r=0;r<PP;r++)for(let c=0;c<PP;c++){
+      const g=px[(gr*PP+r)*28+(gc*PP+c)];
+      let x=gc*PS+c*S2+ox, y=gr*PS+r*S2+oy, s=S2;
+      if(isU&&fly>0){                        // pixel k glides to slot k of the 1x16 strip
+        const k=r*PP+c, st=(W-6)/(PP*PP);
+        const tx=3+k*st, ty=G*PS+14, tsz=st-1;
+        x+= (tx-x)*fly; y+=(ty-y)*fly; s+=(tsz-s)*fly;
+      }
+      ctx.fillStyle=`rgb(${g},${g},${g})`;
+      ctx.fillRect(x,y,Math.max(s-0.4,0.6),Math.max(s-0.4,0.6));
+    }
+    if(spread>0.05&&!(isU&&fly>0.5)){
+      ctx.strokeStyle=isU?'#ffd166':'#2a3441';
+      ctx.strokeRect(gc*PS+ox,gr*PS+oy,PS,PS);}
+  }
+  ctx.fillStyle='#8b97a5';ctx.font='9px sans-serif';
+  if(fly>0.55)ctx.fillText(`flatten patch (${ugr},${ugc}) → ${PD} values`,3,G*PS+34);
+  if(showE>0){
+    ctx.globalAlpha=showE;
+    ctx.fillStyle='#8b97a5';ctx.fillText('× W + b  →',3,G*PS+50);
+    const tok=R.toks[u+1], n=Math.max(...tok.map(Math.abs))||1;
+    for(let d=0;d<4;d++){ctx.fillStyle=acolStr(tok[d],n);ctx.fillRect(52+d*17,G*PS+42,15,11);}
+    ctx.fillStyle='#9fd6ff';ctx.fillText('= token '+(u+1),52+4*17+4,G*PS+50);
+    ctx.globalAlpha=1;
+  }
 }
 function paintAttn(){
   for(let h=0;h<4;h++){
@@ -367,6 +419,7 @@ const dcv=document.getElementById('draw');
 let drawing=false, rebuildTimer=null;
 function afterInputChange(){
   R=forward(px); liveStages=clsStagesOf(R);
+  computeUnwrap();
   paint2D(); updateLiveMarker();
   if(typeof renderLesson==='function')renderLesson(true);   // refresh live numbers, keep scroll
   clearTimeout(rebuildTimer);
@@ -1055,8 +1108,13 @@ addEventListener('resize',fit);
 function project(v,cam,w,h){const p=v.clone().project(cam);
   return {x:(p.x*0.5+0.5)*w,y:(-p.y*0.5+0.5)*h,vis:p.z<1};}
 const scaleV=new THREE.Vector3(0.45,0.45,0.45),tmpM=new THREE.Matrix4();
+let lastFrameMs=0;
 function loop(){
   requestAnimationFrame(loop);
+  const nowMs=(typeof performance!=='undefined')?performance.now():0;
+  const dt=lastFrameMs?Math.min((nowMs-lastFrameMs)/1000,0.1):0.016;
+  lastFrameMs=nowMs;
+  if(tokenHL<=0){patchAnimT+=dt;paintPatchesAnim(patchAnimT);}   // pause on hover-trace
   if(camAnim){
     camN.position.lerp(camPos,0.06);ctrN.target.lerp(camTgt,0.08);
     if(camN.position.distanceTo(camPos)<0.4&&ctrN.target.distanceTo(camTgt)<0.4)camAnim=false;}
@@ -1079,7 +1137,7 @@ function loop(){
     l.el.style.display=s.vis?'block':'none';l.el.style.left=s.x+'px';l.el.style.top=s.y+'px';});
 }
 camN.position.set(-30,52,120);
-paint2D();buildNet();fit();setClsStage(0);updateLiveMarker();go(0);loop();
+computeUnwrap();paint2D();buildNet();fit();setClsStage(0);updateLiveMarker();go(0);loop();
 </script>
 </body>
 </html>
