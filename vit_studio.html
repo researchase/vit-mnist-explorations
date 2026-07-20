@@ -40,8 +40,11 @@
   #stepBubble{bottom:58px;right:12px;top:auto}
   #netTip{position:fixed;display:none;z-index:30;background:#0b0f14f2;border:1px solid var(--line);
     border-radius:7px;padding:6px 9px;font-size:11.5px;pointer-events:none;line-height:1.5;
-    box-shadow:0 6px 20px #000c}
+    box-shadow:0 6px 20px #000c;max-width:440px}
   #netTip b{color:var(--gold)}
+  #netTip .calc{display:block;font-family:ui-monospace,Menlo,monospace;color:#9fd6ff;
+    background:#070a0f;border-radius:5px;padding:4px 8px;margin-top:5px;font-size:11px;
+    white-space:normal;word-break:break-word}
   #stepBubble::before{top:auto;bottom:-7px;left:auto;right:30px;transform:rotate(225deg)}
   #tip3d{position:fixed;pointer-events:none;display:none;z-index:30;background:#0b0f14ee;
     border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:11.5px;max-width:270px}
@@ -713,6 +716,51 @@ function contribsOf(g,r,c){
   else if(g==='prob'){rowA('clsW',r,4);rowA('clsNorm',0,4);}
   return S;
 }
+function calcOf(g,r,c){
+  const f2=x=>(+x).toFixed(2),f3=x=>(+x).toFixed(3);
+  const dot=(pairs,b,total,maxTerms)=>{           // pairs: [[w,x],...] -> "w×x + … (+b) = total"
+    let terms=pairs.map(p=>({s:`${f2(p[0])}×${f2(p[1])}`,m:Math.abs(p[0]*p[1])}));
+    let ell='';
+    if(maxTerms&&terms.length>maxTerms){
+      terms.sort((a,b2)=>b2.m-a.m);
+      ell=` + … (${pairs.length} terms)`;
+      terms=terms.slice(0,maxTerms);
+    }
+    return terms.map(t=>t.s).join(' + ')+ell+(b!=null?` + ${f2(b)}`:'')+` = ${f3(total)}`;
+  };
+  const lnCalc=(x,gam,bet,d,out)=>{
+    const m=x.reduce((a,v)=>a+v,0)/4,sd=Math.sqrt(x.reduce((a,v)=>a+(v-m)*(v-m),0)/4+1e-5);
+    return `(${f2(x[d])} − ${f2(m)})/${f2(sd)} × ${f2(gam[d])} + ${f2(bet[d])} = ${f3(out)}`;
+  };
+  if(g==='tok'){
+    if(r===0)return `learned CLS weight: ${f3(Wt.cls[c])}`;
+    const gr=((r-1)/G)|0,gc=(r-1)%G,pairs=[];
+    for(let rr=0;rr<PP;rr++)for(let cc2=0;cc2<PP;cc2++){
+      const j=rr*PP+cc2;
+      pairs.push([Wt.patchW[c][j],(px[(gr*PP+rr)*28+(gc*PP+cc2)]/255-MEAN)/STD]);}
+    return dot(pairs,Wt.patchB[c],R.toks[r][c],3);
+  }
+  if(g==='pos')return `learned position weight: ${f3(Wt.pos[r][c])}`;
+  if(g==='posed')return `${f3(R.toks[r][c])} + ${f3(Wt.pos[r][c])} = ${f3(R.posed[r][c])}`;
+  if(g==='normed')return lnCalc(R.posed[r],Wt.lnW,Wt.lnB,c,R.normed[r][c]);
+  if(g==='Q'||g==='K'||g==='V'){
+    const off=g==='Q'?0:g==='K'?4:8;
+    return dot(R.normed[r].map((xv,k)=>[Wt.qkvW[off+c][k],xv]),null,valOf(g,r,c));}
+  if(g.startsWith('attn')&&g!=='attnOut'){
+    const h=+g.slice(4);
+    return `softmax(${f3(R.Q[r][h])} × ${f3(R.K[c][h])}) → ${f3(R.A[h][r][c])}  (${(R.A[h][r][c]*100).toFixed(1)}% of row)`;}
+  if(g==='attnOut'){
+    const pairs=[];for(let j=0;j<T;j++)pairs.push([R.A[c][r][j],R.V[j][c]]);
+    return dot(pairs,null,R.attnOut[r][c],3);}
+  if(g==='resid'){
+    const terms=[0,1,2,3].map(h=>`${f2(Wt.outW[c][h])}×${f2(R.attnOut[r][h])}`).join(' + ');
+    return `${f2(R.posed[r][c])} + ${terms} + ${f2(Wt.outB[c])} = ${f3(R.resid[r][c])}`;}
+  if(g==='clsNorm')return lnCalc(R.resid[0],Wt.headLnW,Wt.headLnB,c,R.clsN[c]);
+  if(g==='prob'){
+    const terms=R.clsN.map((v,d)=>`${f2(Wt.clsW[r][d])}×${f2(v)}`).join(' + ');
+    return `logit = ${terms} + ${f2(Wt.clsB[r])} = ${f3(R.logits[r])} → softmax = ${(R.probs[r]*100).toFixed(1)}%`;}
+  return `learned weight: ${f3(valOf(g,r,c))}`;
+}
 function provOf(g,r,c,nContrib){
   const v=valOf(g,r,c),f3=x=>(+x).toFixed(3);
   const tk=t=>t===0?'CLS':'patch '+(t-1);
@@ -732,7 +780,8 @@ function provOf(g,r,c,nContrib){
   else if(g==='prob')sub=`P(class ${r}) = softmax(clsW·ŷ)[${r}]`;
   return `<b>${g}</b>[${r},${c}] = <b>${f3(v)}</b><br>`+
     `<span style="color:#8b97a5">${sub}</span>`+
-    (nContrib?`<br><span style="color:#7fd7ff;font-size:10px">◼ ${nContrib} highlighted cells fed this value</span>`:'');
+    `<span class="calc">${calcOf(g,r,c)}</span>`+
+    (nContrib?`<span style="color:#7fd7ff;font-size:10px">◼ ${nContrib} highlighted cells fed this value</span>`:'');
 }
 renN.domElement.addEventListener('pointermove',ev=>{
   const nb=renN.domElement.getBoundingClientRect();
