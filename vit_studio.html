@@ -42,6 +42,11 @@
     border-radius:7px;padding:6px 9px;font-size:11.5px;pointer-events:none;line-height:1.5;
     box-shadow:0 6px 20px #000c;max-width:440px}
   #netTip b{color:var(--gold)}
+  .clstick{position:absolute;font-size:9px;pointer-events:none;transform:translate(-50%,-50%);
+    text-shadow:0 1px 2px #000;z-index:2;opacity:.85}
+  #clsTip{position:fixed;display:none;z-index:30;background:#0b0f14f4;border:1px solid var(--line);
+    border-radius:7px;padding:5px 9px;font-size:11.5px;pointer-events:none;box-shadow:0 6px 20px #000c}
+  #clsTip .m{font-family:ui-monospace,Menlo,monospace;color:#9fd6ff}
   #netTip .calc{display:block;font-family:ui-monospace,Menlo,monospace;color:#9fd6ff;
     background:#070a0f;border-radius:5px;padding:4px 8px;margin-top:5px;font-size:11px;
     white-space:normal;word-break:break-word}
@@ -186,6 +191,7 @@
 </footer>
 <div class="bubble" id="stepBubble" style="display:none;position:fixed"></div>
 <div id="netTip"></div>
+<div id="clsTip"></div>
 </div>
 
 <script src="three.min.js"></script>
@@ -609,17 +615,23 @@ let DD=CLS4D_ATTN, SC=DD.stages.length; const NC=DD.labels.length;
 function jet(t){t=clamp01(t);const f=4*t;
   return new THREE.Color(clamp01(Math.min(f-1.5,-f+4.5)),clamp01(Math.min(f-0.5,-f+3.5)),
                          clamp01(Math.min(f+0.5,-f+2.5)));}
-let lo=[1e9,1e9,1e9],hi=[-1e9,-1e9,-1e9];
-for(let s=0;s<SC;s++)for(let i=0;i<NC;i++)for(let d=0;d<3;d++){
-  const v=DD.coords[s][i][d];if(v<lo[d])lo[d]=v;if(v>hi[d])hi[d]=v;}
-const ctr3=lo.map((v,d)=>(v+hi[d])/2);
-const span=Math.max(...lo.map((v,d)=>hi[d]-v))||1,SCALE=30/span;
+let lo,hi,ctr3,SCALE,GH=18;
+const GST=6, WALLC=[0x2f8f8f,0x8a72d6,0xc98a3a];   // floor(xz) · back(xy) · side(yz)
+function computeBounds(){                            // recomputed whenever the model (DD) changes
+  lo=[1e9,1e9,1e9];hi=[-1e9,-1e9,-1e9];
+  for(let s=0;s<SC;s++)for(let i=0;i<NC;i++)for(let d=0;d<3;d++){
+    const v=DD.coords[s][i][d];if(v<lo[d])lo[d]=v;if(v>hi[d])hi[d]=v;}
+  ctr3=lo.map((v,d)=>(v+hi[d])/2);
+  const span=Math.max(...lo.map((v,d)=>hi[d]-v))||1; SCALE=28/span;
+  GH=Math.ceil(span/2*SCALE/GST+0.5)*GST;            // grid hugs the data with one cell of margin
+}
+computeBounds();
 const PXc=v4=>new THREE.Vector3(...[0,1,2].map(d=>(v4[d]-ctr3[d])*SCALE));
 const Pc=(s,i)=>PXc(DD.coords[s][i]);
 const COLc=v4=>jet((v4[3]-DD.d3min)/(DD.d3max-DD.d3min||1));
+const dataVal=(sceneCoord,axis)=>sceneCoord/SCALE+ctr3[axis];   // scene unit -> real dim value
 
-/* dotted grid walls */
-const GH=16,GST=4;
+/* dotted grid walls (rebuildable) */
 function gridPlane(plane,at,color){
   const pts=[];
   for(let t=-GH;t<=GH+1e-6;t+=GST){
@@ -630,10 +642,29 @@ function gridPlane(plane,at,color){
   g.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
   const ls=new THREE.LineSegments(g,new THREE.LineDashedMaterial(
     {color,dashSize:1,gapSize:1.4,transparent:true,opacity:0.45}));
-  ls.computeLineDistances();return ls;}
-sceneC.add(gridPlane('xz',-GH,0x2f8f8f));
-sceneC.add(gridPlane('xy',-GH,0x8a72d6));
-sceneC.add(gridPlane('yz',-GH,0xc98a3a));
+  ls.computeLineDistances();ls.name='grid';return ls;}
+let gridLines=[];
+function rebuildGrid(){
+  gridLines.forEach(l=>{sceneC.remove(l);l.geometry.dispose();});
+  gridLines=[gridPlane('xz',-GH,WALLC[0]),gridPlane('xy',-GH,WALLC[1]),gridPlane('yz',-GH,WALLC[2])];
+  gridLines.forEach(l=>sceneC.add(l));
+  buildTicks();
+}
+let ticksEls=[];
+function buildTicks(){                       // numeric scale on the 3 axes + axis names
+  ticksEls.forEach(t=>t.el.remove()); ticksEls=[];
+  const wrap=document.getElementById('clswrap');
+  const mk=(v,txt,col,big)=>{const el=document.createElement('div');
+    el.className='clstick'; el.textContent=txt; el.style.color=col;
+    if(big)el.style.fontWeight='700'; wrap.appendChild(el); ticksEls.push({el,v});};
+  for(let s=-1;s<=1;s++){const t=s*GH;
+    mk(new THREE.Vector3(t,-GH,-GH), dataVal(t,0).toFixed(1), '#3fb0b0');
+    mk(new THREE.Vector3(-GH,t,-GH), dataVal(t,1).toFixed(1), '#a48ae6');
+    mk(new THREE.Vector3(-GH,-GH,t), dataVal(t,2).toFixed(1), '#d9a24a');}
+  mk(new THREE.Vector3(GH+3,-GH,-GH),'dim 0','#3fb0b0',1);
+  mk(new THREE.Vector3(-GH,GH+3,-GH),'dim 1','#a48ae6',1);
+  mk(new THREE.Vector3(-GH,-GH,GH+3),'dim 2','#d9a24a',1);
+}
 
 /* cloud: sphere/cube/pyramid, translucent */
 const GEO=[new THREE.SphereGeometry(0.62,14,10),new THREE.BoxGeometry(1,1,1),
@@ -681,6 +712,25 @@ function setClsStage(s){
     a.setLength(on?14:10,on?2.8:2,on?1.7:1.2);});
   updateLiveMarker();
 }
+/* hover a point -> show its 4 CLS-vector values (d0,d1,d2 = position, d3 = colour) */
+const rayC=new THREE.Raycaster(),mouseC=new THREE.Vector2();
+const clsTip=document.getElementById('clsTip');
+const fmtv=v=>`<span class="m">d0 ${v[0].toFixed(2)} · d1 ${v[1].toFixed(2)} · d2 ${v[2].toFixed(2)} · d3 ${v[3].toFixed(2)}</span>`;
+renC.domElement.addEventListener('pointermove',ev=>{
+  const b=renC.domElement.getBoundingClientRect();
+  mouseC.x=((ev.clientX-b.left)/b.width)*2-1; mouseC.y=-((ev.clientY-b.top)/b.height)*2+1;
+  rayC.setFromCamera(mouseC,camC);
+  let txt=null;
+  const hit=rayC.intersectObjects(meshesC);
+  if(hit.length){const ci=meshesC.indexOf(hit[0].object),gi=idxC[ci][hit[0].instanceId];
+    txt=`digit ${DD.labels[gi]} · ${DD.stages[clsStage]}<br>`+fmtv(DD.coords[clsStage][gi]);}
+  else{const hm=rayC.intersectObject(liveMarker);
+    if(hm.length)txt=`your drawn digit · ${DD.stages[clsStage]}<br>`+fmtv(liveStages[clsStage]);}
+  if(txt){clsTip.style.display='block';clsTip.style.left=(ev.clientX+13)+'px';
+    clsTip.style.top=(ev.clientY+13)+'px';clsTip.innerHTML=txt;}
+  else clsTip.style.display='none';
+});
+renC.domElement.addEventListener('pointerleave',()=>{clsTip.style.display='none';});
 
 /* ================= master timeline ================= */
 function topPatch(h){let j=1,m=-1;for(let x=1;x<T;x++)if(R.A[h][0][x]>m){m=R.A[h][0][x];j=x;}
@@ -1200,6 +1250,9 @@ function loop(){
   liveMarker.position.lerp(liveTarget,0.14);
   liveMarker.rotation.y+=0.02;
   ctrC.update();renC.render(sceneC,camC);
+  const cb=clsWrap.getBoundingClientRect();
+  ticksEls.forEach(t=>{const s=project(t.v,camC,cb.width,cb.height);
+    t.el.style.display=s.vis?'block':'none';t.el.style.left=s.x+'px';t.el.style.top=s.y+'px';});
   /* labels for net panel */
   const nb=netWrap.getBoundingClientRect();
   labelsN.forEach(l=>{const s=project(l.v,camN,nb.width,nb.height);
@@ -1208,12 +1261,14 @@ function loop(){
 function setModel(on){
   MLP_ON=on; ACTIVE=on?NET_MLP:NET; Wt=ACTIVE.weights;
   DD=on?CLS4D_MLP:CLS4D_ATTN; SC=DD.stages.length; layoutX();
+  computeBounds(); rebuildGrid();                    // rescale + resize grid for this model's spread
   document.getElementById('ptotal').textContent=ACTIVE.total;
   document.getElementById('accv').textContent=ACTIVE.acc+'%';
   const btn=document.getElementById('mlpBtn'); btn.textContent='MLP: '+(on?'on':'off'); btn.classList.toggle('on',on);
   R=forward(px); liveStages=clsStagesOf(R); computeUnwrap();
+  const anchor=Pc(0,0);
   if(arrowsC.length&&DD.headDirs)arrowsC.forEach((a,h)=>{const d=DD.headDirs[h];
-    a.setDirection(new THREE.Vector3(d[0],d[1],d[2]).normalize());});
+    a.position.copy(anchor); a.setDirection(new THREE.Vector3(d[0],d[1],d[2]).normalize());});
   paint2D(); rebuildSteps(); buildNet();
   setClsStage(Math.min(clsStage,SC-1)); updateLiveMarker();
   go(Math.min(stepIdx,STEPS.length-1));
@@ -1221,7 +1276,7 @@ function setModel(on){
 document.getElementById('mlpBtn').onclick=()=>setModel(!MLP_ON);
 
 camN.position.set(-30,52,120);
-layoutX();rebuildSteps();
+layoutX();rebuildSteps();rebuildGrid();
 computeUnwrap();paint2D();buildNet();fit();setClsStage(0);updateLiveMarker();go(0);loop();
 </script>
 </body>
