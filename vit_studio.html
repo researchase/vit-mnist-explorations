@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ViT Studio — 371 weights, all views in sync</title>
+<style>
+  :root{--bg:#070a0f;--panel:#10151d;--line:#2a3441;--txt:#e6edf3;--dim:#8b97a5;--gold:#ffd166;
+        --c0:#e6194B;--c1:#3cb44b;--c2:#4363d8}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
+    font:12.5px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  #app{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+  header{display:flex;gap:12px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--line)}
+  header h1{font-size:14px;margin:0}
+  header .sub{color:var(--dim);font-size:11px}
+  button{background:#161b22;color:var(--txt);border:1px solid var(--line);border-radius:7px;
+    padding:5px 10px;cursor:pointer;font-size:12px;font-weight:600}
+  button:hover{border-color:var(--gold)}
+  button.on{border-color:var(--gold);color:var(--gold)}
+  button:disabled{opacity:.35;cursor:default}
+  #main{display:grid;min-height:0}
+  .panel{position:relative;min-width:0;min-height:0}
+  .panel h2{position:absolute;top:6px;left:10px;margin:0;font-size:11px;color:var(--dim);
+    z-index:3;text-transform:uppercase;letter-spacing:.6px}
+  .divider{cursor:col-resize;background:var(--line);width:6px;transition:background .15s}
+  .divider:hover,.divider.drag{background:var(--gold)}
+  .info{cursor:pointer;color:var(--gold);margin-left:6px;font-size:12px;pointer-events:auto;
+    border:1px solid var(--gold);border-radius:50%;padding:0 4px;display:inline-block;line-height:1.3}
+  .bubble{position:absolute;z-index:20;background:#0d1421f4;border:1px solid var(--gold);
+    border-radius:12px;padding:11px 13px;font-size:12px;max-width:330px;line-height:1.55;
+    box-shadow:0 10px 34px #000d;backdrop-filter:blur(6px)}
+  .bubble::before{content:'';position:absolute;top:-7px;left:22px;width:12px;height:12px;
+    background:#0d1421;border-left:1px solid var(--gold);border-top:1px solid var(--gold);
+    transform:rotate(45deg)}
+  .bubble .x{float:right;cursor:pointer;color:var(--dim);font-weight:700;margin-left:8px}
+  .bubble .f{font-family:ui-monospace,Menlo,monospace;color:#9fd6ff;display:block;
+    background:#0b0f14;border-radius:6px;padding:6px 9px;margin:7px 0;font-size:11.5px}
+  .bubble b{color:var(--gold)}
+  #stepBubble{bottom:58px;right:12px;top:auto}
+  #netTip{position:fixed;display:none;z-index:30;background:#0b0f14f2;border:1px solid var(--line);
+    border-radius:7px;padding:6px 9px;font-size:11.5px;pointer-events:none;line-height:1.5;
+    box-shadow:0 6px 20px #000c}
+  #netTip b{color:var(--gold)}
+  #stepBubble::before{top:auto;bottom:-7px;left:auto;right:30px;transform:rotate(225deg)}
+  #tip3d{position:fixed;pointer-events:none;display:none;z-index:30;background:#0b0f14ee;
+    border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:11.5px;max-width:270px}
+  #tip3d b{color:var(--gold)}
+  #tip3d .src{color:#7fd7ff}
+  /* left data panel */
+  #left{overflow:auto;padding:26px 10px 10px}
+  .blk{margin-bottom:9px}
+  .blk .cap{font-size:10px;color:var(--dim);margin-bottom:3px}
+  canvas.hm{display:block;image-rendering:pixelated;border-radius:4px}
+  #draw{cursor:crosshair;border:1px solid var(--line);border-radius:6px;touch-action:none}
+  .hrow{display:flex;gap:5px}
+  .hcell{text-align:center}
+  .hcell span{font-size:9px;color:var(--dim)}
+  .hcell canvas{border:2px solid transparent;border-radius:4px}
+  .hcell.hl canvas{border-color:var(--gold)}
+  .blk.hl #patches, .blk.hl #draw{outline:2px solid var(--gold)}
+  #bars{display:flex;flex-direction:column;gap:5px}
+  .bar{display:flex;align-items:center;gap:6px}
+  .bar .t{width:11px;font-weight:700;font-size:14px}
+  .bar .track{width:110px;height:13px;background:#0b0f14;border-radius:4px;overflow:hidden}
+  .bar .fill{height:100%;transition:width .12s}
+  .bar .v{font-size:10px;color:var(--dim)}
+  #barsblk.hl #bars{outline:2px solid var(--gold);border-radius:4px}
+  #verdict{font-size:13px;margin-top:4px}
+  /* 3d panels */
+  #netwrap,#clswrap{position:relative;overflow:hidden}
+  #netc,#clsc{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .lab{position:absolute;transform:translate(-50%,-100%);pointer-events:none;white-space:nowrap;
+    text-align:center;text-shadow:0 1px 3px #000,0 0 5px #000;transition:opacity .3s;z-index:2}
+  .lab b{font-size:10.5px;color:#fff}
+  .lab small{display:block;font-size:9px;color:var(--dim)}
+  /* bottom timeline */
+  footer{border-top:1px solid var(--line);padding:7px 12px;display:flex;gap:10px;align-items:center}
+  #chips{display:flex;gap:4px;flex-wrap:wrap;flex:1}
+  #chips button{padding:3px 8px;font-size:10.5px;font-weight:500}
+  #stepinfo{min-width:340px}
+  #stepinfo .t{font-weight:700;color:var(--gold);font-size:13px}
+  #stepinfo .c{color:var(--dim);font-size:11px}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <h1>ViT Studio</h1>
+  <span class="sub"><b id="ptotal"></b> weights · acc <b id="accv"></b> · draw or pick a digit — every view updates live</span>
+  <span style="margin-left:auto">digit <span id="btns"></span></span>
+  <button id="clear">clear</button>
+</header>
+
+<div id="main">
+  <div class="panel" id="left">
+    <h2>live data <span class="info" data-b="bLeft">i</span></h2>
+    <div class="bubble" id="bLeft" style="display:none;top:30px;left:10px">
+      <span class="x" onclick="this.parentElement.style.display='none'">✕</span>
+      <b>Live data — the numbers themselves.</b> The whole 371-weight model runs in your
+      browser: draw and every panel recomputes. The four maps are each head's attention
+      <span class="f">A<sub>h</sub> = softmax(q<sub>h</sub>·k<sub>h</sub>ᵀ)</span>
+      row i = where token i looks; the outlined <b>top row is CLS</b> — the digit-summary
+      token reading the patches. Bars = softmax of the 3 class logits.
+    </div>
+    <div class="blk" id="drawblk"><div class="cap">input — draw here (28×28)</div>
+      <canvas id="draw" width="168" height="168"></canvas></div>
+    <div class="blk" id="lookblk"><div class="cap">where CLS looks — 49 attention weights → 7×7 overlay · click a colour to toggle its head</div>
+      <canvas id="overlay" class="hm" width="168" height="168"></canvas>
+      <div class="hrow" id="hleg" style="margin-top:4px"></div></div>
+    <div class="blk" id="patchblk"><div class="cap">49 patches (4×4 px each)</div>
+      <canvas id="patches" class="hm" width="140" height="140"></canvas></div>
+    <div class="blk" id="attnblk"><div class="cap">attention · CLS row emphasized · 50×50</div>
+      <div class="hrow">
+        <div class="hcell" id="hc0"><span>h0</span><canvas id="A0" class="hm" width="64" height="64"></canvas></div>
+        <div class="hcell" id="hc1"><span>h1</span><canvas id="A1" class="hm" width="64" height="64"></canvas></div>
+        <div class="hcell" id="hc2"><span>h2</span><canvas id="A2" class="hm" width="64" height="64"></canvas></div>
+        <div class="hcell" id="hc3"><span>h3</span><canvas id="A3" class="hm" width="64" height="64"></canvas></div>
+      </div></div>
+    <div class="blk" id="barsblk"><div class="cap">prediction</div>
+      <div id="bars"></div><div id="verdict"></div></div>
+  </div>
+
+  <div class="divider" id="divL"></div>
+
+  <div class="panel" id="netwrap">
+    <h2>the machine — every weight <span class="info" data-b="bNet">i</span></h2>
+    <div class="bubble" id="bNet" style="display:none;top:30px;left:10px">
+      <span class="x" onclick="this.parentElement.style.display='none'">✕</span>
+      <b>The machine — every cube is one number.</b> Static sheets are the 371 learned
+      weights; colourful sheets are this digit's activations flowing left→right:
+      <span class="f">t = W·patch + b &nbsp;→&nbsp; x = t + pos &nbsp;→&nbsp; x̂ = γ(x−μ)/σ+β<br>
+      [q k v] = W<sub>qkv</sub>·x̂ &nbsp;→&nbsp; A = softmax(qkᵀ) &nbsp;→&nbsp; Σ<sub>j</sub> A·v<br>
+      x = x + W<sub>o</sub>·heads + b<sub>o</sub> &nbsp;→&nbsp; LN(CLS) &nbsp;→&nbsp; logits</span>
+      Use the timeline below to walk each stage — the current calculation pulses gold.
+      Drag to orbit once the camera lands.
+    </div>
+    <canvas id="netc"></canvas>
+  </div>
+
+  <div class="divider" id="divR"></div>
+
+  <div class="panel" id="clswrap">
+    <h2>CLS journey — raw 4-D (colour = dim 3) <span class="info" data-b="bCls">i</span></h2>
+    <div class="bubble" id="bCls" style="display:none;top:30px;left:10px">
+      <span class="x" onclick="this.parentElement.style.display='none'">✕</span>
+      <b>The CLS token's journey — all 4 dims, no projection.</b> One shape = one test
+      image's CLS vector (sphere 0 · cube 1 · pyramid 2): x,y,z = dims 0–2, colour = dim 3.
+      Every image starts at the same point, then
+      <span class="f">CLS<sub>out</sub> = CLS<sub>in</sub> + b<sub>o</sub> + Σ<sub>h</sub> a<sub>h</sub>(image)·dir<sub>h</sub></span>
+      each head h pushes along its <b>fixed arrow</b> dir<sub>h</sub> by an image-dependent
+      scalar a<sub>h</sub> — one new axis per head. The final LayerNorm stretches the
+      separating axes (γ≈2.6) into three clusters. The glowing octahedron is <b>your
+      drawing</b>; the white trail is its full 7-stage path.
+    </div>
+    <canvas id="clsc"></canvas>
+  </div>
+</div>
+
+<footer>
+  <button id="prev">←</button><button id="next">→</button>
+  <div id="chips"></div>
+  <div id="stepinfo"><div class="t" id="stepT">—</div><div class="c" id="stepC"></div></div>
+  <button id="why" title="explain this step">?</button>
+</footer>
+<div class="bubble" id="stepBubble" style="display:none;position:fixed"></div>
+<div id="netTip"></div>
+</div>
+
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script src="net_data.js"></script>
+<script src="cls4d_data.js"></script>
+<script>
+/* ================= shared: live forward pass (verified vs PyTorch) ================= */
+const Wt=NET.weights, CCC=NET.classColors, MEAN=0.1307, STD=0.3081;
+const CF=NET.cfg, G=CF.grid, PP=CF.patch, T=CF.tokens, PD=CF.patchDim;
+const mv=(W,x,b)=>W.map((row,i)=>row.reduce((s,w,j)=>s+w*x[j], b?b[i]:0));
+function lnv(x,g,b){const n=x.length,m=x.reduce((a,v)=>a+v,0)/n;
+  const v=x.reduce((a,q)=>a+(q-m)*(q-m),0)/n, inv=1/Math.sqrt(v+1e-5);
+  return x.map((q,i)=>(q-m)*inv*g[i]+b[i]);}
+const softmax=a=>{const m=Math.max(...a);const e=a.map(v=>Math.exp(v-m));const s=e.reduce((x,y)=>x+y,0);return e.map(v=>v/s);};
+function forward(px){
+  const norm=px.map(p=>(p/255-MEAN)/STD);
+  const toks=[Wt.cls.slice()];
+  for(let gr=0;gr<G;gr++)for(let gc=0;gc<G;gc++){
+    const pv=[];
+    for(let r=0;r<PP;r++)for(let c=0;c<PP;c++)pv.push(norm[(gr*PP+r)*28+(gc*PP+c)]);
+    toks.push(mv(Wt.patchW,pv,Wt.patchB));
+  }
+  const posed=toks.map((t,i)=>t.map((v,d)=>v+Wt.pos[i][d]));
+  const normed=posed.map(t=>lnv(t,Wt.lnW,Wt.lnB));
+  const qkv=normed.map(t=>mv(Wt.qkvW,t,null));
+  const Q=qkv.map(o=>o.slice(0,4)), K=qkv.map(o=>o.slice(4,8)), V=qkv.map(o=>o.slice(8,12));
+  const A=[];
+  for(let h=0;h<4;h++){A.push([]);
+    for(let i=0;i<T;i++)A[h].push(softmax(K.map((_,j)=>Q[i][h]*K[j][h])));}
+  const attnOut=[];
+  for(let i=0;i<T;i++){const o=[0,0,0,0];
+    for(let h=0;h<4;h++)for(let j=0;j<T;j++)o[h]+=A[h][i][j]*V[j][h];
+    attnOut.push(o);}
+  const resid=posed.map((t,i)=>{const d=mv(Wt.outW,attnOut[i],Wt.outB);return t.map((v,k)=>v+d[k]);});
+  const clsN=lnv(resid[0],Wt.headLnW,Wt.headLnB);
+  const logits=mv(Wt.clsW,clsN,Wt.clsB);
+  return {norm,toks,posed,normed,Q,K,V,A,attnOut,resid,clsN,logits,probs:softmax(logits)};
+}
+/* the CLS journey stages of the CURRENT input (matches cls4d stage order) */
+function clsStagesOf(R){
+  const s=[R.posed[0].slice()];
+  let p=R.posed[0].map((v,d)=>v+Wt.outB[d]); s.push(p.slice());
+  for(let h=0;h<4;h++){p=p.map((v,o)=>v+R.attnOut[0][h]*Wt.outW[o][h]); s.push(p.slice());}
+  s.push(R.clsN.slice());
+  return s;                                   // 7 stages × 4 dims
+}
+
+let px=NET.examples[0].px.slice();
+let R=forward(px);
+let liveStages=clsStagesOf(R);
+
+/* ================= left panel (2D live data) ================= */
+function amax2(A){let m=1e-6;A.forEach(r=>r.forEach(v=>{if(Math.abs(v)>m)m=Math.abs(v);}));return m;}
+function acolStr(v,n){const t=Math.min(1,Math.abs(v)/n);
+  return v>=0?`rgb(${41+190*t|0},${36+143*t|0},26)`:`rgb(26,${89+72*t|0},${107+102*t|0})`;}
+function paintDraw(){
+  const cv=document.getElementById('draw'),ctx=cv.getContext('2d'),S2=cv.width/28;
+  for(let y=0;y<28;y++)for(let x=0;x<28;x++){const g=px[y*28+x];
+    ctx.fillStyle=`rgb(${g},${g},${g})`;ctx.fillRect(x*S2,y*S2,S2,S2);}
+}
+function paintPatches(){
+  const cv=document.getElementById('patches'),ctx=cv.getContext('2d'),S2=cv.width/G;
+  for(let gr=0;gr<G;gr++)for(let gc=0;gc<G;gc++){
+    for(let r=0;r<PP;r++)for(let c=0;c<PP;c++){
+      const g=px[(gr*PP+r)*28+(gc*PP+c)];
+      ctx.fillStyle=`rgb(${g},${g},${g})`;
+      ctx.fillRect(gc*S2+c*S2/PP,gr*S2+r*S2/PP,S2/PP,S2/PP);}
+    ctx.strokeStyle='#2a3441';ctx.strokeRect(gc*S2,gr*S2,S2,S2);}
+}
+function paintAttn(){
+  for(let h=0;h<4;h++){
+    const cv=document.getElementById('A'+h),ctx=cv.getContext('2d');
+    const cw=cv.width/T,ch=cv.height/T;
+    ctx.clearRect(0,0,cv.width,cv.height);
+    for(let i=0;i<T;i++)for(let j=0;j<T;j++){
+      ctx.fillStyle=acolStr(R.A[h][i][j],1);
+      ctx.fillRect(j*cw,i*ch,Math.ceil(cw),Math.ceil(ch));}
+    ctx.strokeStyle='#ffd16688';ctx.strokeRect(0,0,cv.width,ch*1.4);   // CLS row marker
+  }
+}
+function paintBars(){
+  const bars=document.getElementById('bars');bars.innerHTML='';
+  const pred=R.probs.indexOf(Math.max(...R.probs));
+  R.probs.forEach((p,k)=>{
+    const d=document.createElement('div');d.className='bar';
+    d.innerHTML=`<span class="t" style="color:${CCC[k]}">${k}</span>
+      <div class="track"><div class="fill" style="width:${p*100}%;background:${CCC[k]}"></div></div>
+      <span class="v">${(p*100).toFixed(1)}%</span>`;
+    bars.appendChild(d);});
+  document.getElementById('verdict').innerHTML=
+    `→ <b style="color:${CCC[pred]};font-size:15px">${pred}</b> <span style="color:var(--dim)">(${(R.probs[pred]*100).toFixed(1)}%)</span>`;
+}
+/* CLS attention -> 7x7 overlay on the digit, one colour per head */
+const HEADCOL=['#ff5d5d','#54e08a','#5db2ff','#ffcf4d'];
+const headOn=[true,true,true,true];
+function hexRgba(hex,a){const n=parseInt(hex.slice(1),16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
+function paintOverlay(){
+  const cv=document.getElementById('overlay'),ctx=cv.getContext('2d'),S2=cv.width/28;
+  ctx.globalCompositeOperation='source-over';
+  for(let y=0;y<28;y++)for(let x=0;x<28;x++){const g=px[y*28+x]*0.45|0;
+    ctx.fillStyle=`rgb(${g},${g},${g})`;ctx.fillRect(x*S2,y*S2,S2,S2);}
+  const PS=cv.width/G;                       // one patch cell on screen
+  ctx.globalCompositeOperation='lighter';    // heads blend additively where they overlap
+  for(let h=0;h<4;h++){
+    if(!headOn[h])continue;
+    const a=R.A[h][0].slice(1), mx=Math.max(...a)||1;
+    for(let p=0;p<a.length;p++){
+      const t=Math.pow(a[p]/mx,1.4);
+      if(t<0.05)continue;
+      ctx.fillStyle=hexRgba(HEADCOL[h],0.5*t);
+      ctx.fillRect((p%G)*PS,((p/G)|0)*PS,PS,PS);
+    }
+  }
+  ctx.globalCompositeOperation='source-over';
+  ctx.strokeStyle='#2a3441';
+  for(let k=1;k<G;k++){ctx.beginPath();ctx.moveTo(k*PS,0);ctx.lineTo(k*PS,cv.height);
+    ctx.moveTo(0,k*PS);ctx.lineTo(cv.width,k*PS);ctx.stroke();}
+}
+const hleg=document.getElementById('hleg');
+HEADCOL.forEach((c,h)=>{
+  const s=document.createElement('span');
+  s.textContent='head '+h;
+  s.style.cssText=`cursor:pointer;font-size:10px;padding:2px 7px;border-radius:5px;
+    border:1px solid ${c};color:${c};user-select:none`;
+  s.onclick=()=>{headOn[h]=!headOn[h];s.style.opacity=headOn[h]?1:0.3;paintOverlay();};
+  hleg.appendChild(s);});
+function paint2D(){paintDraw();paintPatches();paintAttn();paintBars();paintOverlay();}
+
+/* drawing */
+const dcv=document.getElementById('draw');
+let drawing=false, rebuildTimer=null;
+function afterInputChange(){
+  R=forward(px); liveStages=clsStagesOf(R);
+  paint2D(); updateLiveMarker();
+  clearTimeout(rebuildTimer);
+  rebuildTimer=setTimeout(()=>{recolorNet();},140);   // debounce heavy 3D recolor
+}
+function daub(ev){
+  const b=dcv.getBoundingClientRect();
+  const x=(ev.clientX-b.left)/b.width*28, y=(ev.clientY-b.top)/b.height*28;
+  for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){
+    const X=Math.round(x+dx),Y=Math.round(y+dy);
+    if(X<0||X>27||Y<0||Y>27)continue;
+    const d2=dx*dx+dy*dy, add=d2<=1?255:d2<=2?180:d2<=4?90:0;
+    px[Y*28+X]=Math.min(255,px[Y*28+X]+add);}
+  afterInputChange();
+}
+dcv.addEventListener('pointerdown',ev=>{drawing=true;daub(ev);});
+addEventListener('pointerup',()=>drawing=false);
+dcv.addEventListener('pointermove',ev=>{if(drawing)daub(ev);});
+document.getElementById('clear').onclick=()=>{px=new Array(784).fill(0);afterInputChange();};
+NET.examples.forEach((e,i)=>{
+  const b=document.createElement('button');b.textContent=e.label;
+  b.onclick=()=>{document.querySelectorAll('#btns button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');px=e.px.slice();afterInputChange();};
+  document.getElementById('btns').appendChild(b);});
+document.querySelector('#btns button').classList.add('on');
+document.getElementById('ptotal').textContent=NET.total;
+document.getElementById('accv').textContent=NET.acc+'%';
+
+/* ================= middle panel: the machine (3D, live-recoloured) ================= */
+const netWrap=document.getElementById('netwrap');
+const sceneN=new THREE.Scene(); sceneN.background=new THREE.Color(0x070a0f);
+sceneN.fog=new THREE.Fog(0x070a0f,120,320);
+const camN=new THREE.PerspectiveCamera(50,1,0.1,2000);
+const renN=new THREE.WebGLRenderer({canvas:document.getElementById('netc'),antialias:true});
+renN.setPixelRatio(Math.min(devicePixelRatio,2));
+const ctrN=new THREE.OrbitControls(camN,renN.domElement); ctrN.enableDamping=true;
+let camAnim=false;
+ctrN.addEventListener('start',()=>{camAnim=false;});
+sceneN.add(new THREE.AmbientLight(0xffffff,0.8));
+const dlN=new THREE.DirectionalLight(0xffffff,0.55); dlN.position.set(40,80,60); sceneN.add(dlN);
+
+const TS=0.42, AS=0.18;
+const X={img:-14,patchW:2,tok:12,pos:20,posed:28,normed:36,qkvW:44,Q:52,K:58,V:64,
+         attn:76,attnOut:90,outW:96,resid:104,clsNorm:112,clsW:118,prob:126};
+const clamp01=t=>Math.max(0,Math.min(1,t));
+function wcol(v,n){const t=clamp01(Math.abs(v)/n),c=new THREE.Color();
+  if(v>=0)c.setRGB(0.27+0.66*t,0.27-0.02*t,0.23-0.05*t);else c.setRGB(0.23,0.28+0.05*t,0.30+0.6*t);return c;}
+function acol(v,n){const t=clamp01(Math.abs(v)/n),c=new THREE.Color();
+  if(v>=0)c.setRGB(0.16+0.75*t,0.14+0.56*t,0.10);else c.setRGB(0.10,0.35+0.28*t,0.42+0.4*t);return c;}
+const to2d=a=>Array.isArray(a[0])?a:[a];
+
+let cellsN=[], byKeyN={}, meshN=null, labelsN=[], imgMesh=null, groupN=null;
+function actArrays(){return {tok:R.toks,pos:null,posed:R.posed,normed:R.normed,
+  Q:R.Q,K:R.K,V:R.V,attn0:R.A[0],attn1:R.A[1],attn2:R.A[2],attn3:R.A[3],
+  attnOut:R.attnOut,resid:R.resid,clsNorm:[R.clsN]};}
+function addSheet(arr2d,x,o){
+  const A2=to2d(arr2d),rows=A2.length,cols=A2[0].length;
+  const s=o.step||0.85,cell=s*0.82,thin=o.thin||0.42;
+  const n=o.norm||amax2(A2);
+  const topY=(rows-1)/2*s,z0=-(cols-1)/2*s+(o.zoff||0);
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const v=A2[r][c];
+    const m=new THREE.Matrix4().compose(new THREE.Vector3(x,topY-r*s,z0+c*s),
+      new THREE.Quaternion(),new THREE.Vector3(thin,cell,cell));
+    cellsN.push({mtx:m,base:o.weight?wcol(v,n):acol(v,n),
+      meta:{g:o.id,r,c,act:!o.weight,norm:o.norm||null}});}
+}
+function addLabel(text,sub,x,y,groups){
+  const el=document.createElement('div');el.className='lab';
+  el.innerHTML=`<b>${text}</b>${sub?`<small>${sub}</small>`:''}`;
+  netWrap.appendChild(el);
+  labelsN.push({el,v:new THREE.Vector3(x,y,0),groups:groups||[]});
+}
+function buildNet(){
+  if(groupN){sceneN.remove(groupN);}
+  labelsN.forEach(l=>l.el.remove());labelsN=[];cellsN=[];byKeyN={};
+  groupN=new THREE.Group();sceneN.add(groupN);
+  /* input image plane */
+  const cv=document.createElement('canvas');cv.width=cv.height=28;
+  const ic=cv.getContext('2d');const id=ic.createImageData(28,28);
+  for(let i=0;i<784;i++){const g=px[i];id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=g;id.data[i*4+3]=255;}
+  ic.putImageData(id,0,0);
+  const tex=new THREE.CanvasTexture(cv);tex.magFilter=THREE.NearestFilter;
+  imgMesh=new THREE.Mesh(new THREE.PlaneGeometry(11,11),new THREE.MeshBasicMaterial({map:tex}));
+  imgMesh.position.set(X.img,0,0);imgMesh.rotation.y=Math.PI/2;groupN.add(imgMesh);
+  addLabel('input','28×28',X.img,8,[]);
+
+  addSheet(Wt.patchW,X.patchW,{id:'patchW',weight:1,step:0.5});
+  addLabel('embed W',`${PD}→4`,X.patchW,4,['patchW']);
+  addSheet(R.toks,X.tok,{id:'tok',step:TS}); addLabel('tokens',`${T}×4`,X.tok,T*TS/2+2,['tok']);
+  addSheet(Wt.pos,X.pos,{id:'pos',weight:1,step:TS}); addLabel('pos',`${T*4} w`,X.pos,T*TS/2+2,['pos']);
+  addSheet(R.posed,X.posed,{id:'posed',step:TS}); addLabel('+pos','',X.posed,T*TS/2+2,['posed']);
+  addSheet(R.normed,X.normed,{id:'normed',step:TS}); addLabel('LN','',X.normed,T*TS/2+2,['normed']);
+  addSheet(Wt.qkvW,X.qkvW,{id:'qkvW',weight:1,step:0.9}); addLabel('QKV W','48 w',X.qkvW,7,['qkvW']);
+  addSheet(R.Q,X.Q,{id:'Q',step:TS}); addLabel('Q','',X.Q,T*TS/2+2,['Q']);
+  addSheet(R.K,X.K,{id:'K',step:TS}); addLabel('K','',X.K,T*TS/2+2,['K']);
+  addSheet(R.V,X.V,{id:'V',step:TS}); addLabel('V','',X.V,T*TS/2+2,['V']);
+  for(let h=0;h<4;h++)addSheet(R.A[h],X.attn,{id:'attn'+h,step:AS,thin:0.3,zoff:(h-1.5)*10,norm:1});
+  addLabel('attention ×4',`${T}×${T}`,X.attn,T*AS/2+4,['attn0','attn1','attn2','attn3']);
+  addSheet(R.attnOut,X.attnOut,{id:'attnOut',step:TS}); addLabel('attn out','',X.attnOut,T*TS/2+2,['attnOut']);
+  addSheet(Wt.outW,X.outW,{id:'outW',weight:1,step:0.9}); addLabel('out W','20 w',X.outW,5,['outW']);
+  addSheet(R.resid,X.resid,{id:'resid',step:TS}); addLabel('+resid','',X.resid,T*TS/2+2,['resid']);
+  addSheet([R.clsN],X.clsNorm,{id:'clsNorm',step:0.9}); addLabel('CLS·LN','',X.clsNorm,3,['clsNorm']);
+  addSheet(Wt.clsW,X.clsW,{id:'clsW',weight:1,step:0.9}); addLabel('cls W','15 w',X.clsW,4,['clsW']);
+  for(let k=0;k<3;k++){
+    const p=R.probs[k];
+    const m=new THREE.Matrix4().compose(new THREE.Vector3(X.prob,(1-k)*1.4,0),
+      new THREE.Quaternion(),new THREE.Vector3(0.5+p*6,1,1));
+    const col=new THREE.Color(CCC[k]);col.multiplyScalar(0.45+0.55*p);
+    cellsN.push({mtx:m,base:col,meta:{g:'prob',r:k,c:0,act:true}});}
+  addLabel('prediction','',X.prob,3.4,['prob']);
+
+  meshN=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),
+    new THREE.MeshLambertMaterial(),cellsN.length);
+  cellsN.forEach((c,i)=>{meshN.setMatrixAt(i,c.mtx);meshN.setColorAt(i,c.base);
+    byKeyN[c.meta.g+'|'+c.meta.r+'|'+c.meta.c]=i;});
+  meshN.instanceMatrix.needsUpdate=true;meshN.instanceColor.needsUpdate=true;
+  groupN.add(meshN);
+  applyStepColors();
+}
+function recolorNet(){                    // update activation colours + image + prob bars in place
+  if(!meshN)return;
+  const acts=actArrays(), norms={};
+  for(const k in acts){if(acts[k])norms[k]=k.startsWith('attn')&&k!=='attnOut'?1:amax2(to2d(acts[k]));}
+  for(let i=0;i<cellsN.length;i++){
+    const mt=cellsN[i].meta;
+    if(!mt.act)continue;
+    if(mt.g==='prob'){
+      const p=R.probs[mt.r];
+      const m=new THREE.Matrix4().compose(new THREE.Vector3(X.prob,(1-mt.r)*1.4,0),
+        new THREE.Quaternion(),new THREE.Vector3(0.5+p*6,1,1));
+      meshN.setMatrixAt(i,m);
+      const col=new THREE.Color(CCC[mt.r]);col.multiplyScalar(0.45+0.55*p);
+      cellsN[i].base=col;continue;}
+    const A2=to2d(acts[mt.g]); if(!A2)continue;
+    cellsN[i].base=acol(A2[mt.r][mt.c],norms[mt.g]);
+  }
+  meshN.instanceMatrix.needsUpdate=true;
+  /* image texture */
+  const cv=imgMesh.material.map.image,ic=cv.getContext('2d'),id=ic.createImageData(28,28);
+  for(let i=0;i<784;i++){const g=px[i];id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=g;id.data[i*4+3]=255;}
+  ic.putImageData(id,0,0);imgMesh.material.map.needsUpdate=true;
+  applyStepColors();
+}
+
+/* ================= right panel: CLS 4-D journey ================= */
+const clsWrap=document.getElementById('clswrap');
+const sceneC=new THREE.Scene();sceneC.background=new THREE.Color(0x080b10);
+sceneC.fog=new THREE.Fog(0x080b10,80,220);
+const camC=new THREE.PerspectiveCamera(50,1,0.1,2000);camC.position.set(30,22,46);
+const renC=new THREE.WebGLRenderer({canvas:document.getElementById('clsc'),antialias:true});
+renC.setPixelRatio(Math.min(devicePixelRatio,2));
+const ctrC=new THREE.OrbitControls(camC,renC.domElement);ctrC.enableDamping=true;
+sceneC.add(new THREE.AmbientLight(0xffffff,0.65));
+const dlC=new THREE.DirectionalLight(0xffffff,0.7);dlC.position.set(30,50,40);sceneC.add(dlC);
+
+const DD=CLS4D, SC=DD.stages.length, NC=DD.labels.length;
+function jet(t){t=clamp01(t);const f=4*t;
+  return new THREE.Color(clamp01(Math.min(f-1.5,-f+4.5)),clamp01(Math.min(f-0.5,-f+3.5)),
+                         clamp01(Math.min(f+0.5,-f+2.5)));}
+let lo=[1e9,1e9,1e9],hi=[-1e9,-1e9,-1e9];
+for(let s=0;s<SC;s++)for(let i=0;i<NC;i++)for(let d=0;d<3;d++){
+  const v=DD.coords[s][i][d];if(v<lo[d])lo[d]=v;if(v>hi[d])hi[d]=v;}
+const ctr3=lo.map((v,d)=>(v+hi[d])/2);
+const span=Math.max(...lo.map((v,d)=>hi[d]-v))||1,SCALE=30/span;
+const PXc=v4=>new THREE.Vector3(...[0,1,2].map(d=>(v4[d]-ctr3[d])*SCALE));
+const Pc=(s,i)=>PXc(DD.coords[s][i]);
+const COLc=v4=>jet((v4[3]-DD.d3min)/(DD.d3max-DD.d3min||1));
+
+/* dotted grid walls */
+const GH=16,GST=4;
+function gridPlane(plane,at,color){
+  const pts=[];
+  for(let t=-GH;t<=GH+1e-6;t+=GST){
+    if(plane==='xz'){pts.push(-GH,at,t,GH,at,t,t,at,-GH,t,at,GH);}
+    if(plane==='xy'){pts.push(-GH,t,at,GH,t,at,t,-GH,at,t,GH,at);}
+    if(plane==='yz'){pts.push(at,-GH,t,at,GH,t,at,t,-GH,at,t,GH);}}
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
+  const ls=new THREE.LineSegments(g,new THREE.LineDashedMaterial(
+    {color,dashSize:1,gapSize:1.4,transparent:true,opacity:0.45}));
+  ls.computeLineDistances();return ls;}
+sceneC.add(gridPlane('xz',-GH,0x2f8f8f));
+sceneC.add(gridPlane('xy',-GH,0x8a72d6));
+sceneC.add(gridPlane('yz',-GH,0xc98a3a));
+
+/* cloud: sphere/cube/pyramid, translucent */
+const GEO=[new THREE.SphereGeometry(0.62,14,10),new THREE.BoxGeometry(1,1,1),
+           new THREE.ConeGeometry(0.92,1.4,4)];
+const QUAT=[new THREE.Quaternion(),
+            new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6,0.8,0)),
+            new THREE.Quaternion().setFromEuler(new THREE.Euler(0.12,0.78,0))];
+const idxC=[[],[],[]];
+for(let i=0;i<NC;i++)idxC[DD.labels[i]].push(i);
+const meshesC=[],curP=[],curCol=[];
+for(let ci=0;ci<3;ci++){
+  const m=new THREE.InstancedMesh(GEO[ci],
+    new THREE.MeshLambertMaterial({transparent:true,opacity:0.5,depthWrite:false}),idxC[ci].length);
+  curP.push(idxC[ci].map(i=>Pc(0,i)));
+  curCol.push(idxC[ci].map(i=>COLc(DD.coords[0][i]).clone()));
+  meshesC.push(m);sceneC.add(m);}
+/* head arrows */
+const ARROWC=[0xff5d5d,0x54e08a,0x5db2ff,0xffcf4d];
+const arrowsC=[];
+if(Array.isArray(DD.headDirs)){
+  const anchor=Pc(0,0);
+  for(let h=0;h<DD.headDirs.length;h++){
+    const d=DD.headDirs[h];
+    const a=new THREE.ArrowHelper(new THREE.Vector3(d[0],d[1],d[2]).normalize(),
+      anchor.clone(),11,ARROWC[h],2.2,1.3);
+    a.line.material.transparent=true;a.cone.material.transparent=true;
+    arrowsC.push(a);sceneC.add(a);}}
+/* live marker for the current input + its trail */
+const liveMat=new THREE.MeshLambertMaterial({emissive:0x222222});
+const liveMarker=new THREE.Mesh(new THREE.OctahedronGeometry(1.1),liveMat);
+sceneC.add(liveMarker);
+const trailGeo=new THREE.BufferGeometry();
+const trail=new THREE.Line(trailGeo,new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.55}));
+sceneC.add(trail);
+let clsStage=0, liveTarget=new THREE.Vector3();
+function updateLiveMarker(){
+  trailGeo.setFromPoints(liveStages.map(v4=>PXc(v4)));
+  liveTarget.copy(PXc(liveStages[clsStage]));
+  liveMat.color.copy(COLc(liveStages[clsStage]));
+}
+function setClsStage(s){
+  clsStage=Math.max(0,Math.min(SC-1,s));
+  arrowsC.forEach((a,h)=>{const on=(clsStage>=2&&clsStage<=5)&&h===clsStage-2;
+    a.line.material.opacity=on?1:0.2;a.cone.material.opacity=on?1:0.2;
+    a.setLength(on?14:10,on?2.8:2,on?1.7:1.2);});
+  updateLiveMarker();
+}
+
+/* ================= master timeline ================= */
+function topPatch(h){let j=1,m=-1;for(let x=1;x<T;x++)if(R.A[h][0][x]>m){m=R.A[h][0][x];j=x;}
+  return `patch (${((j-1)/G)|0},${(j-1)%G}) @ ${(m*100).toFixed(0)}%`;}
+const row=(g,r,n)=>Array.from({length:n},(_,c)=>({g,r,c}));
+const STEPS=[
+ {t:'Overview',cap:()=>`all ${NET.total} weights + this digit's activations · orbit freely`,cam:[[-30,52,120],[52,2,0]],focus:null,cls:0},
+ {t:'Patches',cap:()=>`28×28 → ${G}×${G} grid of ${PP}×${PP} patches (0 weights)`,cam:[[-32,6,26],[-10,0,0]],focus:[],cls:0,hl:'patchblk'},
+ {t:'Patch embed',cap:()=>`${PD} px × W → 4 numbers per patch`,cam:[[-8,10,34],[7,0,0]],focus:['patchW','tok'],cls:0,hl:'patchblk',
+  anim:{len:196,at:i=>{const t2=1+(i>>2),d=i&3;return [{g:'tok',r:t2,c:d},...row('patchW',d,PD)];}}},
+ {t:'CLS token',cap:()=>'a learned 4-vector joins as token 0',cam:[[2,10,30],[12,4,0]],focus:['tok'],cls:0,
+  anim:{len:4,at:i=>[{g:'tok',r:0,c:i}]}},
+ {t:'+ position',cap:()=>`${T}×4 learned position table (${T*4} w — the biggest block)`,cam:[[10,12,34],[24,0,0]],focus:['pos','tok','posed'],cls:0,
+  anim:{len:T*4,at:i=>{const t2=i>>2,d=i&3;return [{g:'posed',r:t2,c:d},{g:'pos',r:t2,c:d},{g:'tok',r:t2,c:d}];}}},
+ {t:'LayerNorm',cap:()=>'each token row → mean 0, var 1, ×γ+β',cam:[[20,12,34],[32,0,0]],focus:['posed','normed'],cls:0,
+  anim:{len:T,at:i=>[...row('posed',i,4),...row('normed',i,4)]}},
+ {t:'Q·K·V',cap:()=>'one 12×4 matrix; head h owns column h (dim_head=1)',cam:[[32,14,40],[52,0,0]],focus:['normed','qkvW','Q','K','V'],cls:0,
+  anim:{len:T*4,at:i=>{const t2=i>>2,d=i&3;return [{g:'Q',r:t2,c:d},...row('normed',t2,4),...row('qkvW',d,4)];}}},
+ {t:'Attention scores',cap:()=>'softmax(q·k) per head — 0 weights, computed fresh',cam:[[52,14,58],[76,0,0]],focus:['Q','K','attn0','attn1','attn2','attn3'],cls:1,hl:'attnblk',
+  anim:{len:T*4,at:i=>{const h=(i/T)|0,j=i%T;return [{g:'attn'+h,r:0,c:j},{g:'Q',r:0,c:h},{g:'K',r:j,c:h}];}}},
+ {t:'Head 0 reads',cap:()=>`CLS ← Σ A·v along its fixed axis · top: ${topPatch(0)}`,cam:[[64,14,52],[84,0,0]],focus:['attn0','V','attnOut'],cls:2,hl:'hc0',
+  anim:{len:T,at:j=>[{g:'attnOut',r:0,c:0},{g:'attn0',r:0,c:j},{g:'V',r:j,c:0}]}},
+ {t:'Head 1 reads',cap:()=>`second axis opens · top: ${topPatch(1)}`,cam:[[64,14,52],[84,0,0]],focus:['attn1','V','attnOut'],cls:3,hl:'hc1',
+  anim:{len:T,at:j=>[{g:'attnOut',r:0,c:1},{g:'attn1',r:0,c:j},{g:'V',r:j,c:1}]}},
+ {t:'Head 2 reads',cap:()=>`the plane fattens · top: ${topPatch(2)}`,cam:[[64,14,52],[84,0,0]],focus:['attn2','V','attnOut'],cls:4,hl:'hc2',
+  anim:{len:T,at:j=>[{g:'attnOut',r:0,c:2},{g:'attn2',r:0,c:j},{g:'V',r:j,c:2}]}},
+ {t:'Head 3 reads',cap:()=>`3rd dimension lifts · top: ${topPatch(3)}`,cam:[[64,14,52],[84,0,0]],focus:['attn3','V','attnOut'],cls:5,hl:'hc3',
+  anim:{len:T,at:j=>[{g:'attnOut',r:0,c:3},{g:'attn3',r:0,c:j},{g:'V',r:j,c:3}]}},
+ {t:'Project + residual',cap:()=>'heads mixed by out W, added back onto every token',cam:[[82,14,42],[100,0,0]],focus:['attnOut','outW','resid'],cls:5,
+  anim:{len:T*4,at:i=>{const t2=i>>2,d=i&3;return [{g:'resid',r:t2,c:d},...row('outW',d,4),...row('attnOut',t2,4)];}}},
+ {t:'Final LayerNorm',cap:()=>'CLS alone: ÷σ ×γ — the explosion that pries classes apart',cam:[[96,10,30],[110,0,0]],focus:['resid','clsNorm'],cls:6,
+  anim:{len:4,at:i=>[{g:'clsNorm',r:0,c:i},...row('resid',0,4)]}},
+ {t:'Classify',cap:()=>'3 dot products with the 4-D CLS → softmax',cam:[[104,10,32],[120,0,0]],focus:['clsNorm','clsW','prob'],cls:6,hl:'barsblk',
+  anim:{len:3,at:i=>[{g:'prob',r:i,c:0},...row('clsW',i,4),...row('clsNorm',0,4)]}},
+ {t:'Done',cap:()=>`${NET.total} weights, three views, one forward pass`,cam:[[-30,52,120],[52,2,0]],focus:null,cls:6},
+];
+/* jalammar-style per-step explanations (formula + why) */
+const MATHS=[
+ {f:'371 weights total: 68 embed · 4 CLS · 200 pos · 8 LN · 48 QKV · 20 out · 8 LN · 15 classify',
+  w:'Everything you see is one forward pass of this tiny ViT. The three panels are three views of the same computation.'},
+ {f:'28×28 image → 49 patches of 4×4 pixels',
+  w:'Pure slicing, zero weights. From here on the transformer never sees pixels — only patch tokens. Like words in a sentence, each patch becomes a token.'},
+ {f:'t = W·p + b    (W: 4×16 → each patch: 16 px → 4 numbers)',
+  w:'The embedding matrix compresses each patch 4×. This is the only place pixel information enters — whatever W discards is gone forever (why mean-pooling beat median, and 4px patches beat 7px).'},
+ {f:'CLS = learned 4-vector (same for every image)',
+  w:'A blank passenger token. It carries no image content — attention will let it READ the patches, and the final prediction is made from it alone.'},
+ {f:'x<sub>i</sub> = t<sub>i</sub> + pos<sub>i</sub>    (50×4 table, 200 weights)',
+  w:'Attention is order-blind, so each slot\'s learned position vector is ADDED into the same 4 channels — content and location superimposed, not stored separately.'},
+ {f:'x̂ = γ·(x−μ)/σ + β    (per token row, μ σ over its 4 dims)',
+  w:'Keeps every token well-scaled before attention. A rotate/stretch in your matrix picture — 8 learned weights (γ, β).'},
+ {f:'[q k v] = W<sub>qkv</sub>·x̂    (4→12; head h owns column h)',
+  w:'With dim 4 and 4 heads, dim_head = 1: each head\'s query, key and value are SINGLE scalars per token. Four heads = four 1-D lenses on every token.'},
+ {f:'A<sub>h</sub>[i,j] = softmax<sub>j</sub>(q<sub>h,i</sub>·k<sub>h,j</sub>)   — zero weights',
+  w:'The only place tokens compare. Each score is literally one multiplication of two scalars; softmax turns each row into weights that sum to 1. Computed fresh for every image.'},
+ {f:'read<sub>0</sub> = Σ<sub>j</sub> A<sub>0</sub>[CLS,j]·v<sub>0,j</sub>  →  CLS moves by a<sub>0</sub>·dir<sub>0</sub>',
+  w:'Head 0 blends all 50 values by its CLS attention row into ONE scalar, which pushes the CLS point along head 0\'s fixed axis (red arrow, right panel). Watch the cloud stretch into a LINE.'},
+ {f:'read<sub>1</sub> = Σ<sub>j</sub> A<sub>1</sub>[CLS,j]·v<sub>1,j</sub>  →  + a<sub>1</sub>·dir<sub>1</sub>',
+  w:'Second head, second fixed axis (≈144° from the first) — the line opens into a plane. Each head can only ever add one dimension: its output is a single scalar times a fixed direction.'},
+ {f:'read<sub>2</sub> = Σ<sub>j</sub> A<sub>2</sub>[CLS,j]·v<sub>2,j</sub>  →  + a<sub>2</sub>·dir<sub>2</sub>',
+  w:'Third axis — the plane fattens. Head 2 also pushes hard on dim 3 (the colour axis): watch colours sort as much as positions.'},
+ {f:'read<sub>3</sub> = Σ<sub>j</sub> A<sub>3</sub>[CLS,j]·v<sub>3,j</sub>  →  + a<sub>3</sub>·dir<sub>3</sub>',
+  w:'Fourth axis lifts the cloud into 3-D. Four rank-1 pushes, nearly orthogonal directions — the coordinate system of the answer, built one axis per head.'},
+ {f:'x = x + W<sub>o</sub>·concat(heads) + b<sub>o</sub>    (residual add)',
+  w:'The head readings are mixed by the 4×4 output matrix and ADDED onto each token (residual). The CLS token has now absorbed everything it needs.'},
+ {f:'ŷ = γ·(CLS−μ)/σ + β    → variance ×9',
+  w:'The explosion: dividing by the CLS\'s own small σ and multiplying by γ≈2.6 stretches exactly the class-separating axes ~3× while squashing the rest. A learned magnifier placed right before the classifier.'},
+ {f:'logits = W<sub>c</sub>·ŷ + b<sub>c</sub> ;  p = softmax(logits)',
+  w:'Three dot products with the 4-number CLS vector. The entire image is now 4 numbers; each class scores its match. Highest logit wins.'},
+ {f:'p(digit) — one forward pass, three synchronized views',
+  w:'Draw a new digit and run the timeline again: the weights never change, only the data flowing through them.'},
+];
+function renderStepBubble(){
+  const sb=document.getElementById('stepBubble');
+  const m=MATHS[stepIdx]||{f:'',w:''};
+  sb.innerHTML=`<span class="x" onclick="this.parentElement.style.display='none'">✕</span>
+    <b>${STEPS[stepIdx].t}</b><span class="f">${m.f}</span>${m.w}`;
+}
+let stepIdx=0,tick=0;
+let hoverId=-1,hoverContribs=null;
+const camPos=new THREE.Vector3(),camTgt=new THREE.Vector3();
+const white=new THREE.Color(0xffe9a8),bgc=new THREE.Color(0x11161d),tmpc=new THREE.Color();
+const cyanC=new THREE.Color(0x7fd7ff);
+function applyStepColors(){
+  if(!meshN)return;
+  const st=STEPS[stepIdx],fs=st.focus===null?null:new Set(st.focus);
+  let hl=null;
+  if(st.anim){hl=new Set(st.anim.at(tick%st.anim.len).map(o=>byKeyN[o.g+'|'+o.r+'|'+o.c]).filter(x=>x!==undefined));}
+  for(let i=0;i<cellsN.length;i++){
+    tmpc.copy(cellsN[i].base);
+    if(fs&&!fs.has(cellsN[i].meta.g))tmpc.lerp(bgc,0.86);
+    if(hl&&hl.has(i))tmpc.copy(cellsN[i].base).lerp(white,0.75);
+    if(hoverContribs&&hoverContribs.has(i))tmpc.copy(cellsN[i].base).lerp(cyanC,0.7);
+    if(i===hoverId)tmpc.setRGB(1,1,1);
+    meshN.setColorAt(i,tmpc);}
+  meshN.instanceColor.needsUpdate=true;
+}
+let hlEl=null;
+function applyStep(){
+  const st=STEPS[stepIdx];
+  camPos.fromArray(st.cam[0]);camTgt.fromArray(st.cam[1]);camAnim=true;
+  tick=0;applyStepColors();
+  setClsStage(st.cls);
+  document.getElementById('stepT').textContent=(stepIdx+1)+' · '+st.t;
+  document.getElementById('stepC').textContent=st.cap();
+  document.getElementById('prev').disabled=stepIdx===0;
+  document.getElementById('next').disabled=stepIdx===STEPS.length-1;
+  [...document.getElementById('chips').children].forEach((el,i)=>el.classList.toggle('on',i===stepIdx));
+  if(hlEl)hlEl.classList.remove('hl');
+  hlEl=st.hl?document.getElementById(st.hl):null;
+  if(hlEl)hlEl.classList.add('hl');
+  const fs=st.focus===null?null:new Set(st.focus);
+  labelsN.forEach(l=>{l.el.style.opacity=(fs===null||l.groups.some(g=>fs.has(g)))?1:(l.groups.length===0?0.9:0.22);});
+  renderStepBubble();
+}
+function go(i){stepIdx=Math.max(0,Math.min(STEPS.length-1,i));applyStep();}
+document.getElementById('prev').onclick=()=>go(stepIdx-1);
+document.getElementById('next').onclick=()=>go(stepIdx+1);
+addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();go(stepIdx+1);}
+  if(e.key==='ArrowLeft'){e.preventDefault();go(stepIdx-1);}});
+STEPS.forEach((s,i)=>{const b=document.createElement('button');b.textContent=s.t;
+  b.onclick=()=>go(i);document.getElementById('chips').appendChild(b);});
+setInterval(()=>{if(STEPS[stepIdx].anim){tick++;applyStepColors();}},110);
+
+/* explanation bubbles */
+document.querySelectorAll('.info').forEach(b=>{
+  b.onclick=()=>{const t=document.getElementById(b.dataset.b);
+    t.style.display=t.style.display==='none'?'block':'none';};});
+document.getElementById('why').onclick=()=>{
+  const sb=document.getElementById('stepBubble');
+  renderStepBubble();
+  sb.style.display=sb.style.display==='none'?'block':'none';};
+
+/* draggable panel dividers */
+let leftW=308,rightW=470;
+function applyCols(){
+  document.getElementById('main').style.gridTemplateColumns=
+    `${leftW}px 6px 1fr 6px ${rightW}px`;
+  fit();
+}
+function dragify(el,side){
+  el.addEventListener('pointerdown',e=>{
+    e.preventDefault();el.classList.add('drag');
+    const sx=e.clientX, sw=side==='L'?leftW:rightW;
+    const mv=ev=>{const d=ev.clientX-sx;
+      if(side==='L')leftW=Math.max(180,Math.min(520,sw+d));
+      else rightW=Math.max(240,Math.min(innerWidth-560,sw-d));
+      applyCols();};
+    const up=()=>{el.classList.remove('drag');
+      removeEventListener('pointermove',mv);removeEventListener('pointerup',up);};
+    addEventListener('pointermove',mv);addEventListener('pointerup',up);
+  });
+}
+dragify(document.getElementById('divL'),'L');
+dragify(document.getElementById('divR'),'R');
+applyCols();
+
+/* ---- bbycroft-style hover: value + which cells fed this neuron ---- */
+const rayN=new THREE.Raycaster(),mouseN=new THREE.Vector2();
+const netTip=document.getElementById('netTip');
+function valOf(g,r,c){
+  const WMAP={patchW:Wt.patchW,pos:Wt.pos,qkvW:Wt.qkvW,outW:Wt.outW,clsW:Wt.clsW};
+  if(g==='prob')return R.probs[r];
+  if(WMAP[g])return WMAP[g][r][c];
+  const acts=actArrays();
+  return acts[g]?to2d(acts[g])[r][c]:NaN;
+}
+function contribsOf(g,r,c){
+  const S=new Set();
+  const add=(g2,r2,c2)=>{const id=byKeyN[g2+'|'+r2+'|'+c2];if(id!==undefined)S.add(id);};
+  const rowA=(g2,r2,n)=>{for(let k=0;k<n;k++)add(g2,r2,k);};
+  if(g==='tok'){if(r>0)rowA('patchW',c,PD);}
+  else if(g==='posed'){add('tok',r,c);add('pos',r,c);}
+  else if(g==='normed'){rowA('posed',r,4);}
+  else if(g==='Q'||g==='K'||g==='V'){const off=g==='Q'?0:g==='K'?4:8;rowA('normed',r,4);rowA('qkvW',off+c,4);}
+  else if(g.startsWith('attn')&&g!=='attnOut'){const h=+g.slice(4);add('Q',r,h);add('K',c,h);}
+  else if(g==='attnOut'){for(let j=0;j<T;j++){add('attn'+c,r,j);add('V',j,c);}}
+  else if(g==='resid'){rowA('attnOut',r,4);rowA('outW',c,4);add('posed',r,c);}
+  else if(g==='clsNorm'){rowA('resid',0,4);}
+  else if(g==='prob'){rowA('clsW',r,4);rowA('clsNorm',0,4);}
+  return S;
+}
+function provOf(g,r,c,nContrib){
+  const v=valOf(g,r,c),f3=x=>(+x).toFixed(3);
+  const tk=t=>t===0?'CLS':'patch '+(t-1);
+  let sub='learned weight';
+  if(g==='tok')sub=r===0?'CLS token — learned, no inputs':`= ${tk(r)} pixels · embedW row ${c} + b`;
+  else if(g==='pos')sub=`learned position vector, slot ${r} (${tk(r)})`;
+  else if(g==='posed')sub='= token + position (same cell in both sheets)';
+  else if(g==='normed')sub=`= LayerNorm of token ${r}'s row`;
+  else if(g==='Q'||g==='K'||g==='V')
+    sub=`= x̂[${tk(r)}] · qkvW row — head ${c}'s ${g==='Q'?'query':g==='K'?'key':'value'} scalar`;
+  else if(g.startsWith('attn')&&g!=='attnOut'){
+    const h=+g.slice(4),q=R.Q[r][h],k=R.K[c][h];
+    sub=`${tk(r)} → ${tk(c)}: q·k = ${f3(q)}×${f3(k)} = ${f3(q*k)} → softmax row`;}
+  else if(g==='attnOut')sub=`= Σⱼ A${c}[${tk(r)},j]·V[j,${c}] — head ${c}'s reading`;
+  else if(g==='resid')sub='= posed + W_o·heads + b_o (residual add)';
+  else if(g==='clsNorm')sub='= γ(CLS−μ)/σ + β — the classifier\'s input';
+  else if(g==='prob')sub=`P(class ${r}) = softmax(clsW·ŷ)[${r}]`;
+  return `<b>${g}</b>[${r},${c}] = <b>${f3(v)}</b><br>`+
+    `<span style="color:#8b97a5">${sub}</span>`+
+    (nContrib?`<br><span style="color:#7fd7ff;font-size:10px">◼ ${nContrib} highlighted cells fed this value</span>`:'');
+}
+renN.domElement.addEventListener('pointermove',ev=>{
+  const nb=renN.domElement.getBoundingClientRect();
+  mouseN.x=((ev.clientX-nb.left)/nb.width)*2-1;
+  mouseN.y=-((ev.clientY-nb.top)/nb.height)*2+1;
+  rayN.setFromCamera(mouseN,camN);
+  const hit=meshN?rayN.intersectObject(meshN):[];
+  if(hit.length){
+    netTip.style.left=(ev.clientX+14)+'px';netTip.style.top=(ev.clientY+14)+'px';
+    netTip.style.display='block';
+    const id=hit[0].instanceId;
+    if(id!==hoverId){
+      hoverId=id;
+      const m=cellsN[id].meta;
+      hoverContribs=contribsOf(m.g,m.r,m.c);
+      netTip.innerHTML=provOf(m.g,m.r,m.c,hoverContribs.size);
+      applyStepColors();
+    }
+  } else if(hoverId!==-1){
+    hoverId=-1;hoverContribs=null;netTip.style.display='none';applyStepColors();
+  }
+});
+renN.domElement.addEventListener('pointerleave',()=>{
+  if(hoverId!==-1){hoverId=-1;hoverContribs=null;netTip.style.display='none';applyStepColors();}});
+
+/* ================= sizing + render loop ================= */
+function fit(){
+  const nb=netWrap.getBoundingClientRect(),cb=clsWrap.getBoundingClientRect();
+  renN.setSize(nb.width,nb.height,false);camN.aspect=nb.width/nb.height;camN.updateProjectionMatrix();
+  renC.setSize(cb.width,cb.height,false);camC.aspect=cb.width/cb.height;camC.updateProjectionMatrix();
+}
+addEventListener('resize',fit);
+function project(v,cam,w,h){const p=v.clone().project(cam);
+  return {x:(p.x*0.5+0.5)*w,y:(-p.y*0.5+0.5)*h,vis:p.z<1};}
+const scaleV=new THREE.Vector3(0.45,0.45,0.45),tmpM=new THREE.Matrix4();
+function loop(){
+  requestAnimationFrame(loop);
+  if(camAnim){
+    camN.position.lerp(camPos,0.06);ctrN.target.lerp(camTgt,0.08);
+    if(camN.position.distanceTo(camPos)<0.4&&ctrN.target.distanceTo(camTgt)<0.4)camAnim=false;}
+  ctrN.update();renN.render(sceneN,camN);
+  /* cls panel: morph cloud + live marker */
+  for(let ci=0;ci<3;ci++){
+    const m=meshesC[ci],ids=idxC[ci];
+    for(let k=0;k<ids.length;k++){
+      curP[ci][k].lerp(Pc(clsStage,ids[k]),0.12);
+      tmpM.compose(curP[ci][k],QUAT[ci],scaleV);m.setMatrixAt(k,tmpM);
+      tmpc.copy(COLc(DD.coords[clsStage][ids[k]]));curCol[ci][k].lerp(tmpc,0.12);
+      m.setColorAt(k,curCol[ci][k]);}
+    m.instanceMatrix.needsUpdate=true;m.instanceColor.needsUpdate=true;}
+  liveMarker.position.lerp(liveTarget,0.14);
+  liveMarker.rotation.y+=0.02;
+  ctrC.update();renC.render(sceneC,camC);
+  /* labels for net panel */
+  const nb=netWrap.getBoundingClientRect();
+  labelsN.forEach(l=>{const s=project(l.v,camN,nb.width,nb.height);
+    l.el.style.display=s.vis?'block':'none';l.el.style.left=s.x+'px';l.el.style.top=s.y+'px';});
+}
+camN.position.set(-30,52,120);
+paint2D();buildNet();fit();setClsStage(0);updateLiveMarker();go(0);loop();
+</script>
+</body>
+</html>

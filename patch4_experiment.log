@@ -1,0 +1,11 @@
+Using device: cuda - NVIDIA GeForce RTX 3090
+attention-only · 1 block · 4 heads · 50 epochs · 3 seeds
+
+ patch   grid  tokens  dim  params         accuracy    time
+--------------------------------------------------------------
+   7px 4x4         17    4     371    98.04% ± 0.05     37s
+   4px 7x7         50    4     371    98.83% ± 0.23     37s
+
+   7px 4x4         17    8     867    98.94% ± 0.32     38s
+   4px 7x7         50    8     867    99.21% ± 0.03     38s
+

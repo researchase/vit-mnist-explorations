@@ -1,0 +1,10 @@
+Using device: cuda - NVIDIA GeForce RTX 3090
+train 18623  test 3147  (digits [0, 1, 2])
+
+config                                    pixels  tokens   params         accuracy
+------------------------------------------------------------------------------------
+baseline 28x28 (learned 7x7 embed)        784 px      16   21,251    98.82% ± 0.23
+tiny 4x4 (mean-pool 7x7 patch)             16 px      16   18,179    92.73% ± 1.48
+tiny 4x4 (median-pool 7x7 patch)           16 px      16   18,179    82.36% ± 1.03
+tiny 7x7 (mean-pool 4x4 patch)             49 px      49   20,291    96.90% ± 0.46
+tiny 7x7 (median-pool 4x4 patch)           49 px      49   20,291    93.84% ± 0.42

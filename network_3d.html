@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ViT-371 · step-by-step walkthrough</title>
+<style>
+  :root{--txt:#e6edf3;--dim:#8b97a5;--bg:#070a0f;--gold:#ffd166;--card:#0d1219ee;--line:#2a3441}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
+    font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  #c{position:fixed;inset:0;display:block}
+  .lab{position:absolute;transform:translate(-50%,-100%);pointer-events:none;white-space:nowrap;
+    text-align:center;text-shadow:0 1px 3px #000,0 0 6px #000;transition:opacity .3s}
+  .lab b{font-size:12px;color:#fff}
+  .lab small{display:block;font-size:10px;color:var(--dim)}
+  /* left walkthrough panel — the bbycroft-style narration */
+  #walk{position:fixed;top:14px;left:14px;width:352px;max-height:calc(100vh - 28px);
+    display:flex;flex-direction:column;gap:10px;z-index:4}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+    backdrop-filter:blur(6px)}
+  #head h1{margin:0;font-size:16px;font-weight:700}
+  #head .sub{color:var(--dim);font-size:11px;margin-top:2px}
+  #head .sub b{color:var(--gold)}
+  #steps{overflow:auto;padding:6px 8px}
+  #steps div{padding:4px 8px;border-radius:7px;cursor:pointer;color:var(--dim);font-size:12px}
+  #steps div:hover{background:#1c232d;color:var(--txt)}
+  #steps div.on{background:#1c232d;color:var(--gold);font-weight:600}
+  #desc{font-size:13px}
+  #desc h2{margin:0 0 6px;font-size:14px;color:var(--gold)}
+  #desc .m{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9fd6ff}
+  #desc .w{color:#f2a2a2}
+  #desc p{margin:6px 0}
+  #nav{display:flex;gap:8px;align-items:center}
+  #nav button{flex:1;background:#161b22;color:var(--txt);border:1px solid var(--line);
+    border-radius:8px;padding:8px 0;cursor:pointer;font-size:13px;font-weight:600}
+  #nav button:hover{border-color:var(--gold)}
+  #nav button:disabled{opacity:.35;cursor:default}
+  #nav .cnt{color:var(--dim);font-size:11px;min-width:52px;text-align:center}
+  #panel{position:fixed;top:14px;right:16px;text-align:right;z-index:4}
+  #panel button{background:#161b22;color:var(--txt);border:1px solid var(--line);border-radius:7px;
+    padding:6px 12px;margin-left:6px;cursor:pointer;font-size:13px;font-weight:600}
+  #panel button.on{border-color:var(--gold);color:var(--gold)}
+  #panel .lg{margin-top:10px;font-size:11px;color:var(--dim);line-height:1.7}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:2px;margin:0 3px -1px 8px}
+  #tip{position:fixed;pointer-events:none;background:#0b0f14ee;border:1px solid var(--line);
+    border-radius:6px;padding:5px 8px;font-size:12px;display:none;z-index:6}
+  #hint{position:fixed;bottom:12px;right:16px;color:var(--dim);font-size:11px;text-align:right}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="walk">
+  <div class="card" id="head">
+    <h1>ViT · MNIST 0/1/2 — <b style="color:var(--gold)" id="ptotal"></b> weights</h1>
+    <div class="sub">a guided walk through every calculation · test accuracy <b id="accv"></b></div>
+  </div>
+  <div class="card" id="steps"></div>
+  <div class="card" id="desc"></div>
+  <div class="card" id="nav">
+    <button id="prev">← Prev</button>
+    <span class="cnt" id="cnt"></span>
+    <button id="next">Next →</button>
+  </div>
+</div>
+
+<div id="panel">
+  <div>digit&nbsp;<span id="btns"></span></div>
+  <div class="lg">
+    <div>weights: <span class="sw" style="background:#3b6fd6"></span>−&nbsp;
+      <span class="sw" style="background:#444"></span>0&nbsp;
+      <span class="sw" style="background:#d64b3b"></span>+</div>
+    <div>activations: <span class="sw" style="background:#2aa0c0"></span>−&nbsp;
+      <span class="sw" style="background:#e8b23a"></span>+</div>
+    <div><span class="sw" style="background:var(--gold)"></span>current calculation</div>
+    <div id="predv" style="margin-top:6px"></div>
+  </div>
+</div>
+<div id="tip"></div>
+<div id="hint">←/→ or Space to step · drag to orbit · scroll to zoom · hover a cell for its value</div>
+
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script src="net_data.js"></script>
+<script>
+/* ============================== scene ============================== */
+const W = NET.weights, CC = NET.classColors;
+const CF=NET.cfg, T=CF.tokens, G=CF.grid, NP=CF.patches, PD=CF.patchDim;  // 50 tokens, 7x7 grid, 4x4 patches
+const TS=0.42, AS=0.18;   // sheet cell steps for token-height (50-row) and attention (50x50) sheets
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070a0f);
+scene.fog = new THREE.Fog(0x070a0f, 120, 320);
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'), antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.addEventListener('start', ()=>{camAnimating=false;});  // any drag/zoom cancels the fly-in
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const dl = new THREE.DirectionalLight(0xffffff, 0.55); dl.position.set(40,80,60); scene.add(dl);
+
+let group = new THREE.Group(); scene.add(group);
+let labels = [];   // {el, v(THREE.Vector3), groups[]}
+let cells = [];    // {mtx, base(THREE.Color), meta{g,r,c,v}}
+let byKey = {};    // "g|r|c" -> instanceId
+let byGroup = {};  // g -> [ids]
+let mesh = null;
+
+const clamp01 = t=>Math.max(0,Math.min(1,t));
+const to2d = a=>Array.isArray(a[0])?a:[a];
+function maxabs(A){let m=1e-6;A.forEach(r=>r.forEach(v=>{const a=Math.abs(v);if(a>m)m=a;}));return m;}
+function wcol(v,n){const t=clamp01(Math.abs(v)/n),c=new THREE.Color();
+  if(v>=0)c.setRGB(0.27+0.66*t,0.27-0.02*t,0.23-0.05*t);else c.setRGB(0.23,0.28+0.05*t,0.30+0.6*t);return c;}
+function acol(v,n){const t=clamp01(Math.abs(v)/n),c=new THREE.Color();
+  if(v>=0)c.setRGB(0.16+0.75*t,0.14+0.56*t,0.10);else c.setRGB(0.10,0.35+0.28*t,0.42+0.4*t);return c;}
+
+function addSheet(arr2d, x, o){       // o: {id,weight,step,thin,zoff,norm}
+  const A=to2d(arr2d), rows=A.length, colsN=A[0].length;
+  const s=o.step||0.85, cell=s*0.82, thin=o.thin||0.42, n=o.norm||maxabs(A);
+  const topY=(rows-1)/2*s, z0=-(colsN-1)/2*s+(o.zoff||0);
+  for(let r=0;r<rows;r++)for(let c=0;c<colsN;c++){
+    const v=A[r][c];
+    const m=new THREE.Matrix4().compose(
+      new THREE.Vector3(x, topY-r*s, z0+c*s), new THREE.Quaternion(),
+      new THREE.Vector3(thin, cell, cell));
+    cells.push({mtx:m, base:o.weight?wcol(v,n):acol(v,n), meta:{g:o.id,r,c,v}});
+  }
+}
+function addLabel(text, sub, x, y, groups){
+  const el=document.createElement('div'); el.className='lab';
+  el.innerHTML=`<b>${text}</b>${sub?`<small>${sub}</small>`:''}`;
+  document.body.appendChild(el);
+  labels.push({el, v:new THREE.Vector3(x,y,0), groups:groups||[]});
+}
+function addImage(px,x){
+  const cv=document.createElement('canvas');cv.width=cv.height=28;const ic=cv.getContext('2d');
+  const id=ic.createImageData(28,28);
+  for(let i=0;i<784;i++){const g=px[i];id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=g;id.data[i*4+3]=255;}
+  ic.putImageData(id,0,0);
+  const tex=new THREE.CanvasTexture(cv);tex.magFilter=THREE.NearestFilter;
+  const pl=new THREE.Mesh(new THREE.PlaneGeometry(11,11), new THREE.MeshBasicMaterial({map:tex}));
+  pl.position.set(x,0,0);pl.rotation.y=Math.PI/2;group.add(pl);
+}
+
+/* stage x positions */
+const X={img:-14, patchW:2, tok:12, pos:20, posed:28, normed:36, qkvW:44, Q:52, K:58, V:64,
+         attn:76, attnOut:90, outW:96, resid:104, clsNorm:112, clsW:118, prob:126};
+
+let EX = 0;   // current example index
+function build(exIdx){
+  EX = exIdx;
+  scene.remove(group); group.traverse(o=>{if(o.geometry)o.geometry.dispose();});
+  group=new THREE.Group(); scene.add(group);
+  labels.forEach(l=>l.el.remove()); labels=[]; cells=[]; byKey={}; byGroup={};
+  const ex=NET.examples[exIdx], A=ex.act;
+
+  addImage(ex.px, X.img);                 addLabel('input','28×28 · digit '+ex.label, X.img, 8, []);
+  addSheet(W.patchW, X.patchW,{id:'patchW',weight:1,step:0.5});
+     addLabel('patch embed W',`${PD}→4 · ${PD*4}+4 w`, X.patchW, 4*0.5/2+3, ['patchW']);
+  addSheet(A.embed, X.tok,{id:'tok',step:TS});
+     addLabel('tokens',`CLS + ${NP} patches · ${T}×4`, X.tok, T*TS/2+2, ['tok']);
+  addSheet(W.pos, X.pos,{id:'pos',weight:1,step:TS});
+     addLabel('positional',`${T}×4 · ${T*4} w`, X.pos, T*TS/2+2, ['pos']);
+  addSheet(A.posed, X.posed,{id:'posed',step:TS});
+     addLabel('+ position',`${T}×4`, X.posed, T*TS/2+2, ['posed']);
+  addSheet(A.normed, X.normed,{id:'normed',step:TS});
+     addLabel('LayerNorm','γ,β · 8 w', X.normed, T*TS/2+2, ['normed']);
+  addSheet(W.qkvW, X.qkvW,{id:'qkvW',weight:1,step:0.9});
+     addLabel('QKV W','4→12 · 48 w', X.qkvW, 12*0.9/2+2, ['qkvW']);
+  addSheet(A.Q, X.Q,{id:'Q',step:TS}); addLabel('Q',`${T}×4`, X.Q, T*TS/2+2, ['Q']);
+  addSheet(A.K, X.K,{id:'K',step:TS}); addLabel('K',`${T}×4`, X.K, T*TS/2+2, ['K']);
+  addSheet(A.V, X.V,{id:'V',step:TS}); addLabel('V',`${T}×4`, X.V, T*TS/2+2, ['V']);
+  for(let h=0;h<4;h++)
+    addSheet(A.attn[h], X.attn,{id:'attn'+h,step:AS,thin:0.3,zoff:(h-1.5)*10});
+  addLabel('attention · 4 heads',`softmax(qkᵀ) · ${T}×${T} each · 0 w`, X.attn, T*AS/2+4,
+           ['attn0','attn1','attn2','attn3']);
+  addSheet(A.attnOut, X.attnOut,{id:'attnOut',step:TS});
+     addLabel('attention out',`${T}×4`, X.attnOut, T*TS/2+2, ['attnOut']);
+  addSheet(W.outW, X.outW,{id:'outW',weight:1,step:0.9});
+     addLabel('output W','4→4 · 16+4 w', X.outW, 4*0.9/2+3, ['outW']);
+  addSheet(A.resid, X.resid,{id:'resid',step:TS});
+     addLabel('+ residual',`${T}×4`, X.resid, T*TS/2+2, ['resid']);
+  addSheet(to2d(A.clsNorm), X.clsNorm,{id:'clsNorm',step:0.9});
+     addLabel('CLS · final LN','1×4 · 8 w', X.clsNorm, 3, ['clsNorm']);
+  addSheet(W.clsW, X.clsW,{id:'clsW',weight:1,step:0.9});
+     addLabel('classifier W','4→3 · 12+3 w', X.clsW, 3*0.9/2+3, ['clsW']);
+  for(let k=0;k<3;k++){
+    const p=A.probs[k];
+    const m=new THREE.Matrix4().compose(new THREE.Vector3(X.prob,(1-k)*1.4,0),
+      new THREE.Quaternion(), new THREE.Vector3(0.5+p*6,1.0,1.0));
+    const col=new THREE.Color(CC[k]); col.multiplyScalar(0.45+0.55*p);
+    cells.push({mtx:m, base:col, meta:{g:'prob',r:k,c:0,v:p}});
+  }
+  addLabel('prediction','softmax', X.prob, 3.4, ['prob']);
+
+  const geo=new THREE.BoxGeometry(1,1,1);
+  mesh=new THREE.InstancedMesh(geo,new THREE.MeshLambertMaterial(),cells.length);
+  cells.forEach((c,i)=>{mesh.setMatrixAt(i,c.mtx);mesh.setColorAt(i,c.base);
+    byKey[c.meta.g+'|'+c.meta.r+'|'+c.meta.c]=i;
+    (byGroup[c.meta.g]=byGroup[c.meta.g]||[]).push(i);});
+  mesh.instanceMatrix.needsUpdate=true; mesh.instanceColor.needsUpdate=true;
+  group.add(mesh);
+
+  const pr=A.probs, pred=pr.indexOf(Math.max(...pr));
+  document.getElementById('predv').innerHTML =
+    `prediction <b style="color:${CC[pred]}">${pred}</b> (${(pr[pred]*100).toFixed(1)}%) · true ${ex.label}`;
+  applyStep();       // re-apply current step focus/anim to the fresh mesh
+}
+
+/* ============================== steps ============================== */
+const f2=v=>(+v).toFixed(2);
+const vec=a=>'['+a.map(f2).join(', ')+']';
+function attnTop(A,h){let j=1,m=-1;for(let x=1;x<T;x++)if(A.attn[h][0][x]>m){m=A.attn[h][0][x];j=x;}
+  return {j, pct:(m*100).toFixed(0), rc:`(${((j-1)/G)|0},${(j-1)%G})`};}
+const row=(g,r,n)=>Array.from({length:n},(_,c)=>({g,r,c}));
+
+const STEPS=[
+{t:'Overview', cam:[[-30,52,120],[52,2,0]], focus:null,
+ d:ex=>`<h2>The whole network</h2>
+ <p>Every cube is <b>one number</b>. Static sheets are the <span class="w">${NET.total} weights</span>;
+ the colourful sheets are the activations for the digit <b>${ex.label}</b> flowing left→right.</p>
+ <p>This model is the endpoint of your ablations: <b>1 block · 4 heads · dim 4 · no MLP</b>,
+ ${NET.acc}% on 0/1/2. Hit <b>Next</b> to follow one image through every calculation.</p>`},
+{t:'1 · Cut into patches', cam:[[-32,6,26],[-10,0,0]], focus:[],
+ d:ex=>`<h2>28×28 → ${NP} patches</h2>
+ <p>The image is sliced into a ${G}×${G} grid of <b>${CF.patch}×${CF.patch} patches</b>. Each patch will become one
+ <i>token</i> — the transformer never sees pixels again, only these ${NP} tiles (plus CLS).</p>
+ <p>No weights involved yet — this is pure slicing. (Your patch-size experiment showed this finer
+ ${CF.patch}px cut beats 7px at identical parameter count.)</p>`},
+{t:'2 · Patch embedding', cam:[[-8,10,34],[7,0,0]], focus:['patchW','tok'],
+ anim:{len:NP*4, at:i=>{const t2=1+(i>>2), d=i&3;
+   return [{g:'tok',r:t2,c:d}, ...row('patchW',d,PD)];}},
+ d:ex=>`<h2>${PD} pixels × W → 4 numbers</h2>
+ <p>Each patch is flattened to ${PD} values and multiplied by the embed matrix
+ (<span class="w">4×${PD} = ${PD*4} weights + 4 bias</span>):
+ <span class="m">token = W·pixels + b</span>.</p>
+ <p>Watch each token cell light up with the weight row that produces it.
+ 784 pixels become ${NP}×4 = ${NP*4} numbers — only 4× compression per patch (vs 12× with 7px
+ patches), which is why this cut wins. e.g. patch&nbsp;5 → <span class="m">${vec(ex.act.embed[5])}</span></p>`},
+{t:'3 · The CLS token', cam:[[2,10,30],[12,4,0]], focus:['tok'],
+ anim:{len:4, at:i=>[{g:'tok',r:0,c:i}]},
+ d:ex=>`<h2>One learned passenger</h2>
+ <p>A 4-number token (<span class="w">4 weights</span>) is prepended:
+ <span class="m">CLS = ${vec(W.cls)}</span> — the top row, identical for <i>every</i> image.</p>
+ <p>It carries no image content. Attention will let it <b>read</b> the 16 patch tokens,
+ and the final prediction is made from it alone.</p>`},
+{t:'4 · Positional embedding', cam:[[10,12,34],[24,0,0]], focus:['pos','tok','posed'],
+ anim:{len:T*4, at:i=>{const t2=i>>2, d=i&3;
+   return [{g:'posed',r:t2,c:d},{g:'pos',r:t2,c:d},{g:'tok',r:t2,c:d}];}},
+ d:ex=>`<h2>Telling attention <i>where</i></h2>
+ <p>Attention is order-blind, so each of the ${T} slots gets its own learned 4-vector added
+ (<span class="w">${T}×4 = ${T*4} weights</span>): <span class="m">x = token + pos</span>.
+ With ${CF.patch}px patches this table is the single biggest weight block — position matters
+ more when patches are small.</p>
+ <p>Cell-by-cell addition — same coordinates in all three sheets.</p>`},
+{t:'5 · LayerNorm', cam:[[20,12,34],[32,0,0]], focus:['posed','normed'],
+ anim:{len:T, at:i=>[...row('posed',i,4),...row('normed',i,4)]},
+ d:ex=>`<h2>Normalize each token</h2>
+ <p>Every token row is rescaled to mean 0, variance 1, then stretched by γ and shifted by β
+ (<span class="w">8 weights</span>):
+ <span class="m">x̂ = γ·(x−μ)/σ + β</span>.</p>
+ <p>This keeps the numbers well-behaved before attention — a rotate/stretch in your
+ matrix-transform picture.</p>`},
+{t:'6 · Q, K, V projection', cam:[[32,14,40],[52,0,0]], focus:['normed','qkvW','Q','K','V'],
+ anim:{len:T*4, at:i=>{const t2=i>>2, d=i&3;
+   return [{g:'Q',r:t2,c:d}, ...row('normed',t2,4), ...row('qkvW',d,4)];}},
+ d:ex=>`<h2>One matrix, three roles</h2>
+ <p>A single <span class="w">12×4 (48-weight)</span> matrix maps each token to
+ <b>query, key, value</b> (4 numbers each). With dim 4 and 4 heads,
+ <b>each head owns exactly one column</b> — its q, k, v are single scalars per token.</p>
+ <p>CLS's query: <span class="m">${vec(ex.act.Q[0])}</span> — one number per head.</p>`},
+{t:'7 · Attention scores', cam:[[52,14,58],[76,0,0]], focus:['Q','K','attn0','attn1','attn2','attn3'],
+ anim:{len:T*4, at:i=>{const h=(i/T)|0, j=i%T;
+   return [{g:'attn'+h,r:0,c:j},{g:'Q',r:0,c:h},{g:'K',r:j,c:h}];}},
+ d:ex=>{const t0=attnTop(ex.act,0),t1=attnTop(ex.act,1),t2=attnTop(ex.act,2),t3=attnTop(ex.act,3);
+ return `<h2>softmax(q·k) — the only token mixing</h2>
+ <p>Head h scores every pair: <span class="m">a_ij = q_i·k_j / √1</span> — here literally a product
+ of two scalars. Softmax turns each row into weights summing to 1. The four ${T}×${T} sheets have
+ <b>zero parameters</b> — they are computed fresh from this image.</p>
+ <p>Follow the <b>CLS row</b> (top row, animating): head 0 puts ${t0.pct}% on patch ${t0.rc},
+ head 1 → ${t1.pct}% on ${t1.rc}, head 2 → ${t2.pct}% on ${t2.rc}, head 3 → ${t3.pct}% on ${t3.rc}.</p>`}},
+{t:'8 · Weighted sum of V', cam:[[64,14,52],[84,0,0]], focus:['attn0','attn1','attn2','attn3','V','attnOut'],
+ anim:{len:T*4, at:i=>{const h=(i/T)|0, j=i%T;
+   return [{g:'attnOut',r:0,c:h},{g:'attn'+h,r:0,c:j},{g:'V',r:j,c:h}];}},
+ d:ex=>`<h2>CLS reads the patches</h2>
+ <p>Each head blends the ${T} value-scalars with its attention row:
+ <span class="m">out₀ₕ = Σⱼ A₀ⱼ · vⱼ</span>. Concatenating the 4 heads rebuilds a 4-vector
+ per token.</p>
+ <p>This is the moment information moves <b>between</b> tokens — the CLS token becomes
+ image-specific: <span class="m">${vec(ex.act.attnOut[0])}</span>.</p>`},
+{t:'9 · Project + residual', cam:[[82,14,42],[100,0,0]], focus:['attnOut','outW','resid'],
+ anim:{len:T*4, at:i=>{const t2=i>>2, d=i&3;
+   return [{g:'resid',r:t2,c:d}, ...row('outW',d,4), ...row('attnOut',t2,4)];}},
+ d:ex=>`<h2>Mix heads, add back</h2>
+ <p>The concatenated heads pass through the output matrix
+ (<span class="w">4×4 = 16 weights + 4 bias</span>), then are <b>added onto the token</b>
+ (the residual connection): <span class="m">x = x + W·attn_out + b</span>.</p>
+ <p>CLS after its journey: <span class="m">${vec(ex.act.resid[0])}</span>. In your 3D-journey plots,
+ this is the arrow that moved the point into its class cluster.</p>`},
+{t:'10 · Final LayerNorm', cam:[[96,10,30],[110,0,0]], focus:['resid','clsNorm'],
+ anim:{len:4, at:i=>[{g:'clsNorm',r:0,c:i},...row('resid',0,4)]},
+ d:ex=>`<h2>Only CLS goes on</h2>
+ <p>The ${NP} patch tokens are discarded. The CLS row alone is normalized
+ (<span class="w">8 weights</span>) → <span class="m">${vec(ex.act.clsNorm)}</span>.</p>
+ <p>The entire image is now <b>4 numbers</b>.</p>`},
+{t:'11 · Classify', cam:[[104,10,32],[120,0,0]], focus:['clsNorm','clsW','prob'],
+ anim:{len:3, at:i=>[{g:'prob',r:i,c:0},...row('clsW',i,4),...row('clsNorm',0,4)]},
+ d:ex=>{const p=ex.act.probs;
+ return `<h2>Three dot products</h2>
+ <p>Each class scores the CLS vector (<span class="w">3×4 = 12 weights + 3 bias</span>):
+ <span class="m">logits = ${vec(ex.act.logits)}</span> → softmax →</p>
+ <p><span class="m">P(0)=${f2(p[0]*100)}% · P(1)=${f2(p[1]*100)}% · P(2)=${f2(p[2]*100)}%</span></p>`}},
+{t:'12 · Done — 371 weights', cam:[[-30,52,120],[52,2,0]], focus:null,
+ d:ex=>{const p=ex.act.probs,k=p.indexOf(Math.max(...p));
+ return `<h2>That was everything</h2>
+ <p>${PD*4}+4 embed · 4 CLS · ${T*4} pos · 8 LN · 48 QKV · 16+4 out · 8 LN · 12+3 classify
+ = <span class="w">${NET.total} weights</span>, and you watched all of them work.</p>
+ <p>The network says <b style="color:${CC[k]}">${k}</b> with ${(p[k]*100).toFixed(1)}% confidence.
+ Switch digits (top-right) and step through again — the weights stay identical;
+ only the flowing numbers change.</p>`}},
+];
+
+/* ============================ step engine ============================ */
+let stepIdx=0, tick=0, camAnimating=false;
+const camPos=new THREE.Vector3(), camTgt=new THREE.Vector3();
+const white=new THREE.Color(0xffe9a8), bg=new THREE.Color(0x11161d);
+const tmp=new THREE.Color();
+
+function focusSet(){const f=STEPS[stepIdx].focus; return f===null?null:new Set(f);}
+function applyColors(){
+  if(!mesh) return;
+  const fs=focusSet();
+  const st=STEPS[stepIdx];
+  let hl=null;
+  if(st.anim){hl=new Set(st.anim.at(tick%st.anim.len).map(o=>byKey[o.g+'|'+o.r+'|'+o.c]));}
+  for(let i=0;i<cells.length;i++){
+    const c=cells[i];
+    tmp.copy(c.base);
+    if(fs && !fs.has(c.meta.g) && c.meta.g!=='prob'&&fs.size) tmp.lerp(bg,0.86);
+    else if(fs && !fs.has(c.meta.g)) tmp.lerp(bg,0.86);
+    if(hl && hl.has(i)) tmp.copy(c.base).lerp(white,0.75);
+    mesh.setColorAt(i,tmp);
+  }
+  mesh.instanceColor.needsUpdate=true;
+}
+function applyStep(){
+  const st=STEPS[stepIdx];
+  camPos.fromArray(st.cam[0]); camTgt.fromArray(st.cam[1]);
+  camAnimating=true;                      // fly to the stage, then release the camera
+  tick=0; applyColors();
+  document.getElementById('desc').innerHTML = st.d(NET.examples[EX]);
+  document.getElementById('cnt').textContent = (stepIdx+1)+' / '+STEPS.length;
+  document.getElementById('prev').disabled = stepIdx===0;
+  document.getElementById('next').disabled = stepIdx===STEPS.length-1;
+  [...document.getElementById('steps').children].forEach((el,i)=>el.classList.toggle('on',i===stepIdx));
+  const fs=focusSet();
+  labels.forEach(l=>{l.el.style.opacity = (fs===null||l.groups.some(g=>fs.has(g))||l.groups.length===0&&fs===null)?1:(l.groups.length===0?0.9:0.25);});
+}
+function go(i){stepIdx=Math.max(0,Math.min(STEPS.length-1,i));applyStep();}
+document.getElementById('prev').onclick=()=>go(stepIdx-1);
+document.getElementById('next').onclick=()=>go(stepIdx+1);
+addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();go(stepIdx+1);}
+  if(e.key==='ArrowLeft'){e.preventDefault();go(stepIdx-1);}
+});
+const stepsEl=document.getElementById('steps');
+STEPS.forEach((s,i)=>{const d=document.createElement('div');d.textContent=s.t;
+  d.onclick=()=>go(i);stepsEl.appendChild(d);});
+
+setInterval(()=>{const st=STEPS[stepIdx]; if(st.anim){tick++;applyColors();}},110);
+
+/* ============================== ui bits ============================== */
+NET.examples.forEach((e,i)=>{
+  const b=document.createElement('button'); b.textContent=e.label;
+  b.onclick=()=>{document.querySelectorAll('#btns button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); build(i);};
+  document.getElementById('btns').appendChild(b);
+});
+document.querySelector('#btns button').classList.add('on');
+document.getElementById('ptotal').textContent=NET.total;
+document.getElementById('accv').textContent=NET.acc+'%';
+
+const ray=new THREE.Raycaster(); const mouse=new THREE.Vector2(); const tip=document.getElementById('tip');
+addEventListener('mousemove',ev=>{
+  mouse.x=(ev.clientX/innerWidth)*2-1; mouse.y=-(ev.clientY/innerHeight)*2+1;
+  ray.setFromCamera(mouse,camera);
+  const hit=mesh?ray.intersectObject(mesh):[];
+  if(hit.length){const m=cells[hit[0].instanceId].meta;
+    tip.style.display='block';tip.style.left=(ev.clientX+12)+'px';tip.style.top=(ev.clientY+12)+'px';
+    tip.innerHTML=`<b>${m.g}</b> [${m.r},${m.c}] = ${(+m.v).toFixed(3)}`;
+  } else tip.style.display='none';
+});
+
+function project(v){const p=v.clone().project(camera);
+  return {x:(p.x*0.5+0.5)*innerWidth, y:(-p.y*0.5+0.5)*innerHeight, vis:p.z<1};}
+function loop(){
+  requestAnimationFrame(loop);
+  if(camAnimating){
+    camera.position.lerp(camPos,0.06); controls.target.lerp(camTgt,0.08);
+    if(camera.position.distanceTo(camPos)<0.4 && controls.target.distanceTo(camTgt)<0.4)
+      camAnimating=false;                 // arrived — user is free to orbit/zoom
+  }
+  controls.update(); renderer.render(scene,camera);
+  labels.forEach(l=>{const s=project(l.v);
+    l.el.style.display=s.vis?'block':'none'; l.el.style.left=s.x+'px'; l.el.style.top=s.y+'px';});
+}
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);});
+
+camera.position.set(-30,52,120);
+build(0); go(0); loop();
+</script>
+</body>
+</html>

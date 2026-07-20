@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ViT Explainer — patch → prediction, live</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b22;--line:#2a3441;--txt:#e6edf3;--dim:#8b97a5;--gold:#ffd166;
+        --c0:#e6194B;--c1:#3cb44b;--c2:#4363d8}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:baseline;flex-wrap:wrap}
+  header h1{font-size:15px;margin:0}
+  header .sub{color:var(--dim);font-size:12px}
+  #flow{display:flex;gap:6px;align-items:flex-start;padding:14px;overflow-x:auto}
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;flex:none}
+  .stage h3{margin:0 0 2px;font-size:12px;color:var(--gold);white-space:nowrap}
+  .stage .w{font-size:10px;color:var(--dim);margin-bottom:6px;white-space:nowrap}
+  .arrow{align-self:center;color:#4a5665;font-size:20px;flex:none;padding:0 1px}
+  canvas.hm{display:block;image-rendering:pixelated;border-radius:4px;cursor:crosshair}
+  .hgrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+  .hgrid .hcell{text-align:center}
+  .hgrid .hcell span{font-size:9px;color:var(--dim)}
+  #draw{cursor:crosshair;border-radius:6px;border:1px solid var(--line);touch-action:none}
+  .btns{margin-top:6px;display:flex;gap:5px}
+  .btns button{background:#1c232d;color:var(--txt);border:1px solid var(--line);border-radius:6px;
+    padding:3px 10px;cursor:pointer;font-size:12px}
+  .btns button:hover{border-color:var(--gold)}
+  #bars{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+  .bar{display:flex;align-items:center;gap:7px}
+  .bar .t{width:12px;font-weight:700;font-size:15px}
+  .bar .track{width:120px;height:16px;background:#0b0f14;border-radius:4px;overflow:hidden}
+  .bar .fill{height:100%;transition:width .15s}
+  .bar .v{font-size:11px;color:var(--dim);width:44px}
+  #verdict{margin-top:10px;font-size:13px}
+  #inspector{position:fixed;left:14px;bottom:12px;right:14px;background:#0d1219ee;border:1px solid var(--line);
+    border-radius:10px;padding:9px 14px;font-size:12.5px;min-height:40px;backdrop-filter:blur(6px)}
+  #inspector .m{font-family:ui-monospace,Menlo,monospace;color:#9fd6ff}
+  #inspector b{color:var(--gold)}
+</style>
+</head>
+<body>
+<header>
+  <h1>ViT Explainer — patch → prediction</h1>
+  <span class="sub">the 371-weight model running <b>live in your browser</b> · draw a digit or load one ·
+  hover anything to trace the computation (inspired by poloclub/transformer-explainer)</span>
+</header>
+
+<div id="flow">
+  <div class="stage">
+    <h3>input — draw here</h3><div class="w">28×28 · brush or presets</div>
+    <canvas id="draw" width="168" height="168"></canvas>
+    <div class="btns"><button id="clear">clear</button><span id="presets"></span></div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="stage">
+    <h3>49 patches</h3><div class="w">4×4 each · slicing, 0 w</div>
+    <canvas id="patches" class="hm" width="140" height="140"></canvas>
+  </div>
+  <div class="arrow">→</div>
+  <div class="stage">
+    <h3>tokens ×W+pos</h3><div class="w">CLS+49 · 50×4 · 272 w</div>
+    <canvas id="tok" class="hm" width="72" height="350"></canvas>
+  </div>
+  <div class="arrow">→</div>
+  <div class="stage">
+    <h3>Q · K · V</h3><div class="w">LN→48 w · head h = col h</div>
+    <div style="display:flex;gap:5px">
+      <div><span style="font-size:9px;color:var(--dim)">Q</span><canvas id="Q" class="hm" width="56" height="350"></canvas></div>
+      <div><span style="font-size:9px;color:var(--dim)">K</span><canvas id="K" class="hm" width="56" height="350"></canvas></div>
+      <div><span style="font-size:9px;color:var(--dim)">V</span><canvas id="V" class="hm" width="56" height="350"></canvas></div>
+    </div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="stage">
+    <h3>attention · 4 heads</h3><div class="w">softmax(q·k) · 50×50 · 0 w · row 0 = CLS reading</div>
+    <div class="hgrid">
+      <div class="hcell"><span>head 0</span><canvas id="A0" class="hm" width="150" height="150"></canvas></div>
+      <div class="hcell"><span>head 1</span><canvas id="A1" class="hm" width="150" height="150"></canvas></div>
+      <div class="hcell"><span>head 2</span><canvas id="A2" class="hm" width="150" height="150"></canvas></div>
+      <div class="hcell"><span>head 3</span><canvas id="A3" class="hm" width="150" height="150"></canvas></div>
+    </div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="stage">
+    <h3>CLS after attention</h3><div class="w">Σ A·v → ×W + residual · 20 w</div>
+    <canvas id="clsvec" class="hm" width="150" height="40"></canvas>
+    <div class="w" style="margin-top:6px">final LayerNorm · 8 w</div>
+    <canvas id="clsnorm" class="hm" width="150" height="40"></canvas>
+  </div>
+  <div class="arrow">→</div>
+  <div class="stage">
+    <h3>classifier</h3><div class="w">3 dot products · 15 w</div>
+    <div id="bars"></div>
+    <div id="verdict"></div>
+  </div>
+</div>
+
+<div id="inspector">hover a patch, token row, attention cell, or probability bar to see the exact numbers behind it — or draw your own digit and watch every panel react.</div>
+
+<script src="net_data.js"></script>
+<script>
+/* ---------------- forward pass (pure JS, mirrors PyTorch exactly) ---------------- */
+const Wt=NET.weights, CC=NET.classColors, MEAN=0.1307, STD=0.3081;
+const CF=NET.cfg, G=CF.grid, P=CF.patch, T=CF.tokens, PD=CF.patchDim;  // 7x7 grid of 4x4 patches, 50 tokens
+const mv=(W,x,b)=>W.map((row,i)=>row.reduce((s,w,j)=>s+w*x[j], b?b[i]:0));
+function ln(x,g,b,eps){const n=x.length,m=x.reduce((a,v)=>a+v,0)/n;
+  const v=x.reduce((a,q)=>a+(q-m)*(q-m),0)/n, inv=1/Math.sqrt(v+(eps||1e-5));
+  return x.map((q,i)=>(q-m)*inv*g[i]+b[i]);}
+const softmax=a=>{const m=Math.max(...a);const e=a.map(v=>Math.exp(v-m));const s=e.reduce((x,y)=>x+y,0);return e.map(v=>v/s);};
+
+function forward(px){                       // px: 784 ints 0..255
+  const norm=px.map(p=>(p/255-MEAN)/STD);
+  const toks=[Wt.cls.slice()];
+  for(let gr=0;gr<G;gr++)for(let gc=0;gc<G;gc++){
+    const pv=[];
+    for(let r=0;r<P;r++)for(let c=0;c<P;c++)pv.push(norm[(gr*P+r)*28+(gc*P+c)]);
+    toks.push(mv(Wt.patchW,pv,Wt.patchB));
+  }
+  const posed=toks.map((t,i)=>t.map((v,d)=>v+Wt.pos[i][d]));
+  const normed=posed.map(t=>ln(t,Wt.lnW,Wt.lnB));
+  const qkv=normed.map(t=>mv(Wt.qkvW,t,null));
+  const Q=qkv.map(o=>o.slice(0,4)), K=qkv.map(o=>o.slice(4,8)), V=qkv.map(o=>o.slice(8,12));
+  const A=[];                                // [4][T][T], dim_head=1 so scale=1
+  for(let h=0;h<4;h++){A.push([]);
+    for(let i=0;i<T;i++)A[h].push(softmax(K.map((_,j)=>Q[i][h]*K[j][h])));}
+  const attnOut=[];
+  for(let i=0;i<T;i++){const o=[0,0,0,0];
+    for(let h=0;h<4;h++)for(let j=0;j<T;j++)o[h]+=A[h][i][j]*V[j][h];
+    attnOut.push(o);}
+  const resid=posed.map((t,i)=>{const d=mv(Wt.outW,attnOut[i],Wt.outB);return t.map((v,k)=>v+d[k]);});
+  const clsN=ln(resid[0],Wt.headLnW,Wt.headLnB);
+  const logits=mv(Wt.clsW,clsN,Wt.clsB);
+  return {norm,toks,posed,normed,Q,K,V,A,attnOut,resid,clsN,logits,probs:softmax(logits)};
+}
+
+/* ---------------- state ---------------- */
+let px=NET.examples[0].px.slice();
+let R=forward(px);
+let hover={type:null};      // {type:'tok'|'attn'|'prob', ...}
+
+/* ---------------- heatmap painters ---------------- */
+function amax2(A){let m=1e-6;A.forEach(r=>r.forEach(v=>{if(Math.abs(v)>m)m=Math.abs(v);}));return m;}
+function acolor(v,n){const t=Math.min(1,Math.abs(v)/n);
+  return v>=0?`rgb(${41+190*t|0},${36+143*t|0},26)`:`rgb(26,${89+72*t|0},${107+102*t|0})`;}
+function paint(id,A2,opts){                 // A2: rows×cols, opts {hlRow, hlCol, rowTint}
+  const cv=document.getElementById(id),ctx=cv.getContext('2d');
+  const rows=A2.length,cols=A2[0].length,cw=cv.width/cols,ch=cv.height/rows;
+  const n=opts&&opts.norm||amax2(A2);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    ctx.fillStyle=acolor(A2[r][c],n);
+    ctx.fillRect(c*cw,r*ch,cw-0.6,ch-0.6);
+  }
+  if(opts&&opts.hlRow!=null){ctx.strokeStyle='#ffd166';ctx.lineWidth=1.6;
+    ctx.strokeRect(0.8,opts.hlRow*ch+0.8,cv.width-1.6,ch-1.6);}
+  if(opts&&opts.hlCol!=null){ctx.strokeStyle='#ffd16688';ctx.lineWidth=1.6;
+    ctx.strokeRect(opts.hlCol*cw+0.8,0.8,cw-1.6,cv.height-1.6);}
+  if(opts&&opts.hlCell){ctx.strokeStyle='#ffffff';ctx.lineWidth=2.2;
+    ctx.strokeRect(opts.hlCell.c*cw+1,opts.hlCell.r*ch+1,cw-2,ch-2);}
+}
+function paintPatches(){
+  const cv=document.getElementById('patches'),ctx=cv.getContext('2d');
+  const S=cv.width/G;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  for(let gr=0;gr<G;gr++)for(let gc=0;gc<G;gc++){
+    for(let r=0;r<P;r++)for(let c=0;c<P;c++){
+      const g=px[(gr*P+r)*28+(gc*P+c)];
+      ctx.fillStyle=`rgb(${g},${g},${g})`;
+      ctx.fillRect(gc*S+c*S/P,gr*S+r*S/P,S/P,S/P);
+    }
+    ctx.strokeStyle='#2a3441';ctx.strokeRect(gc*S,gr*S,S,S);
+  }
+  const pr=(hover.type==='patch'||(hover.type==='cell'&&['tok','Q','K','V'].includes(hover.panel)))?hover.r:null;
+  if(pr!==null&&pr>0){
+    const p=pr-1;
+    ctx.strokeStyle='#ffd166';ctx.lineWidth=2;
+    ctx.strokeRect((p%G)*S+1,((p/G)|0)*S+1,S-2,S-2);
+  }
+}
+function paintDraw(){
+  const cv=document.getElementById('draw'),ctx=cv.getContext('2d'),S=cv.width/28;
+  for(let y=0;y<28;y++)for(let x=0;x<28;x++){
+    const g=px[y*28+x];ctx.fillStyle=`rgb(${g},${g},${g})`;ctx.fillRect(x*S,y*S,S,S);}
+}
+function render(){
+  const hr = (hover.type==='cell'&&['tok','Q','K','V'].includes(hover.panel))?hover.r
+           : hover.type==='patch'?hover.r : hover.type==='attn'?hover.i : null;
+  const hc = id => (hover.type==='cell'&&hover.panel===id)?{r:hover.r,c:hover.c}:null;
+  paintDraw(); paintPatches();
+  paint('tok',R.posed,{hlRow:hr, hlCell:hc('tok')});
+  paint('Q',R.Q,{hlRow:hr, hlCol:hover.type==='attn'?hover.h:null, hlCell:hc('Q')});
+  paint('K',R.K,{hlRow:hover.type==='attn'?hover.j:hr, hlCol:hover.type==='attn'?hover.h:null, hlCell:hc('K')});
+  paint('V',R.V,{hlRow:hover.type==='attn'?hover.j:hr, hlCell:hc('V')});
+  for(let h=0;h<4;h++)
+    paint('A'+h,R.A[h],{norm:1, hlRow:hover.type==='attn'&&hover.h===h?hover.i:hr,
+                        hlCol:hover.type==='attn'&&hover.h===h?hover.j:null});
+  paint('clsvec',[R.resid[0]],{hlCell:hc('clsvec')});
+  paint('clsnorm',[R.clsN],{hlCell:hc('clsnorm')});
+  // bars
+  const bars=document.getElementById('bars');bars.innerHTML='';
+  const pred=R.probs.indexOf(Math.max(...R.probs));
+  R.probs.forEach((p,k)=>{
+    const d=document.createElement('div');d.className='bar';
+    d.innerHTML=`<span class="t" style="color:${CC[k]}">${k}</span>
+      <div class="track"><div class="fill" style="width:${p*100}%;background:${CC[k]}"></div></div>
+      <span class="v">${(p*100).toFixed(1)}%</span>`;
+    d.onmouseenter=()=>{hover={type:'prob',k};inspect();};
+    d.onmouseleave=()=>{hover={type:null};inspect();render();};
+    bars.appendChild(d);
+  });
+  document.getElementById('verdict').innerHTML =
+    `→ <b style="color:${CC[pred]};font-size:17px">${pred}</b>
+     <span style="color:var(--dim)">(${(R.probs[pred]*100).toFixed(1)}%)</span>`;
+}
+
+/* ---------------- inspector ---------------- */
+const f2=v=>(+v).toFixed(2), f3=v=>(+v).toFixed(3);
+const vec=a=>'['+a.map(f2).join(', ')+']';
+function dotStr(w,x,b){  // "w0×x0 + w1×x1 + … + b = v"
+  const terms=w.map((wi,i)=>`${f2(wi)}×${f2(x[i])}`).join(' + ');
+  const v=w.reduce((s,wi,i)=>s+wi*x[i], b||0);
+  return {s:`${terms}${b!=null?' + '+f2(b):''}`, v};
+}
+function inspect(){
+  const el=document.getElementById('inspector');
+  if(hover.type==='cell'){
+    const {panel,r,c}=hover;
+    if(panel==='tok'){
+      if(r===0){
+        el.innerHTML=`<b>CLS token · dim ${c}</b> — no calculation, pure learned weights:
+          start <span class="m">${f3(Wt.cls[c])}</span> + positional <span class="m">${f3(Wt.pos[0][c])}</span>
+          = <span class="m">${f3(R.posed[0][c])}</span>. Identical for every image.`;
+      } else {
+        // top-3 pixel contributions out of PD
+        const pv=[]; const gr=((r-1)/G)|0, gc=(r-1)%G;
+        for(let rr=0;rr<P;rr++)for(let cc=0;cc<P;cc++){
+          const j=rr*P+cc, x=R.norm[(gr*P+rr)*28+(gc*P+cc)];
+          pv.push({j, w:Wt.patchW[c][j], x, p:Wt.patchW[c][j]*x});
+        }
+        pv.sort((a,b2)=>Math.abs(b2.p)-Math.abs(a.p));
+        const top=pv.slice(0,3).map(t=>`${f2(t.w)}×${f2(t.x)}`).join(' + ');
+        el.innerHTML=`<b>token ${r} (patch ${r-1}) · dim ${c}</b> = W row ${c} · ${PD} pixels + b + pos:<br>
+          <span class="m">${top} + … (${PD} terms) + b ${f2(Wt.patchB[c])} = ${f3(R.toks[r][c])}</span>
+          &nbsp;then&nbsp; <span class="m">+ pos[${r}][${c}] ${f2(Wt.pos[r][c])}
+          = <b>${f3(R.posed[r][c])}</b></span> &nbsp;(showing the 3 largest of ${PD} pixel terms)`;
+      }
+    } else if(panel==='Q'||panel==='K'||panel==='V'){
+      const off=panel==='Q'?0:panel==='K'?4:8, d=off+c;
+      const xh=R.normed[r], dt=dotStr(Wt.qkvW[d],xh,null);
+      const val=(panel==='Q'?R.Q:panel==='K'?R.K:R.V)[r][c];
+      const who=r===0?'CLS':'patch '+(r-1);
+      el.innerHTML=`<b>${panel}[${who}] · head ${c}</b> = qkvW row ${d} · LayerNorm(token ${r}):<br>
+        <span class="m">x̂ = ${vec(xh)}</span><br>
+        <span class="m">${dt.s} = <b>${f3(val)}</b></span>
+        &nbsp;— with dim_head=1 this single number is head ${c}'s entire ${panel==='Q'?'query':panel==='K'?'key':'value'} for this token.`;
+    } else if(panel==='clsvec'){
+      const terms=[0,1,2,3].map(h=>`${f2(Wt.outW[c][h])}×${f2(R.attnOut[0][h])}`).join(' + ');
+      el.innerHTML=`<b>CLS after attention · dim ${c}</b> = residual + output-projection of the 4 head readings:<br>
+        <span class="m">heads = ${vec(R.attnOut[0])}</span> (each head h = Σⱼ A[h][CLS][j]·v[j])<br>
+        <span class="m">${f2(R.posed[0][c])} (residual) + ${terms} + b ${f2(Wt.outB[c])}
+        = <b>${f3(R.resid[0][c])}</b></span>`;
+    } else if(panel==='clsnorm'){
+      const x=R.resid[0], m=x.reduce((a,v)=>a+v,0)/4;
+      const sd=Math.sqrt(x.reduce((a,v)=>a+(v-m)*(v-m),0)/4+1e-5);
+      el.innerHTML=`<b>final LayerNorm · dim ${c}</b> over the CLS row ${vec(x)}:
+        μ=${f3(m)}, σ=${f3(sd)}<br>
+        <span class="m">(${f2(x[c])} − ${f2(m)}) / ${f2(sd)} × γ ${f2(Wt.headLnW[c])} + β ${f2(Wt.headLnB[c])}
+        = <b>${f3(R.clsN[c])}</b></span> — these 4 numbers are all the classifier sees.`;
+    }
+  } else if(hover.type==='patch'){
+    const r=hover.r;
+    if(r===0) el.innerHTML=`<b>CLS token</b> — learned start ${vec(Wt.cls)} + pos ${vec(Wt.pos[0])}
+      → <span class="m">${vec(R.posed[0])}</span>. It has no image content yet; attention row 0 (each head's top row) shows what it reads.`;
+    else el.innerHTML=`<b>patch ${r-1}</b> at grid (${((r-1)/G)|0},${(r-1)%G}) — ${PD} pixels × W(4×${PD}) + b
+      = <span class="m">${vec(R.toks[r])}</span>, + pos → <span class="m">${vec(R.posed[r])}</span>.
+      Its row is outlined across every panel — that's this patch's journey. Hover its token cells for the per-neuron math.`;
+  } else if(hover.type==='attn'){
+    const {h,i,j}=hover, q=R.Q[i][h], k=R.K[j][h], a=R.A[h][i][j];
+    const ni=i===0?'CLS':'patch '+(i-1), nj=j===0?'CLS':'patch '+(j-1);
+    el.innerHTML=`<b>head ${h}</b> · ${ni} → ${nj}: score = q·k = ${f3(q)} × ${f3(k)} = ${f3(q*k)}
+      → softmax over the row → <span class="m">A = ${f3(a)}</span>
+      (${(a*100).toFixed(1)}% of ${ni}'s attention). dim_head=1, so q and k are single numbers.`;
+  } else if(hover.type==='prob'){
+    const k=hover.k, row=Wt.clsW[k];
+    const terms=R.clsN.map((v,d)=>`${f2(row[d])}×${f2(v)}`).join(' + ');
+    el.innerHTML=`<b>class ${k}</b>: logit = ${terms} + ${f2(Wt.clsB[k])}
+      = <span class="m">${f3(R.logits[k])}</span> → softmax → <span class="m">${(R.probs[k]*100).toFixed(1)}%</span>`;
+  } else {
+    el.innerHTML=`hover a patch, token row, attention cell, or probability bar to see the exact numbers —
+      or draw in the input box and watch all ${NET.total} weights do their thing.`;
+  }
+}
+
+/* ---------------- hover wiring ---------------- */
+function cellAt(cv,ev,rows,cols){
+  const b=cv.getBoundingClientRect();
+  const c=Math.floor((ev.clientX-b.left)/b.width*cols), r=Math.floor((ev.clientY-b.top)/b.height*rows);
+  return {r:Math.max(0,Math.min(rows-1,r)), c:Math.max(0,Math.min(cols-1,c))};
+}
+['tok','Q','K','V'].forEach(id=>{
+  const cv=document.getElementById(id);
+  cv.addEventListener('mousemove',ev=>{const {r,c}=cellAt(cv,ev,T,4);
+    hover={type:'cell',panel:id,r,c};inspect();render();});
+  cv.addEventListener('mouseleave',()=>{hover={type:null};inspect();render();});
+});
+['clsvec','clsnorm'].forEach(id=>{
+  const cv=document.getElementById(id);
+  cv.addEventListener('mousemove',ev=>{const {c}=cellAt(cv,ev,1,4);
+    hover={type:'cell',panel:id,r:0,c};inspect();render();});
+  cv.addEventListener('mouseleave',()=>{hover={type:null};inspect();render();});
+});
+for(let h=0;h<4;h++){
+  const cv=document.getElementById('A'+h);
+  cv.addEventListener('mousemove',ev=>{const {r,c}=cellAt(cv,ev,T,T);
+    hover={type:'attn',h,i:r,j:c};inspect();render();});
+  cv.addEventListener('mouseleave',()=>{hover={type:null};inspect();render();});
+}
+const pcv=document.getElementById('patches');
+pcv.addEventListener('mousemove',ev=>{const {r,c}=cellAt(pcv,ev,G,G);
+  hover={type:'patch',r:1+r*G+c};inspect();render();});
+pcv.addEventListener('mouseleave',()=>{hover={type:null};inspect();render();});
+
+/* ---------------- drawing pad ---------------- */
+const dcv=document.getElementById('draw');
+let drawing=false;
+function daub(ev){
+  const b=dcv.getBoundingClientRect();
+  const x=(ev.clientX-b.left)/b.width*28, y=(ev.clientY-b.top)/b.height*28;
+  for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){
+    const X=Math.round(x+dx),Y=Math.round(y+dy);
+    if(X<0||X>27||Y<0||Y>27)continue;
+    const d2=dx*dx+dy*dy, add=d2<=1?255:d2<=2?180:d2<=4?90:0;
+    px[Y*28+X]=Math.min(255,px[Y*28+X]+add);
+  }
+  R=forward(px); inspect(); render();
+}
+dcv.addEventListener('pointerdown',ev=>{drawing=true;daub(ev);});
+addEventListener('pointerup',()=>drawing=false);
+dcv.addEventListener('pointermove',ev=>{if(drawing)daub(ev);});
+document.getElementById('clear').onclick=()=>{px=new Array(784).fill(0);R=forward(px);inspect();render();};
+
+/* preset buttons */
+NET.examples.forEach((e)=>{
+  const b=document.createElement('button');b.textContent=e.label;
+  b.onclick=()=>{px=e.px.slice();R=forward(px);inspect();render();};
+  document.getElementById('presets').appendChild(b);
+});
+
+inspect(); render();
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+Using device: cuda - NVIDIA GeForce RTX 3090
+== (A) trained 4-block model, using only first k blocks (rest identity) ==
+   first 1 block(s): acc 93.36%
+   first 2 block(s): acc 97.01%
+   first 3 block(s): acc 98.51%
+   first 4 block(s): acc 99.17%
+
+== (B) train fresh attention-only models at each depth (3 seeds) ==
+   depth=1: acc 98.99% ± 0.25  (seeds: 98.89, 99.33, 98.76)
+
+   depth=2: acc 99.12% ± 0.24  (seeds: 98.98, 98.92, 99.46)
+
+   depth=3: acc 99.27% ± 0.09  (seeds: 99.36, 99.30, 99.14)
+
+   depth=4: acc 99.25% ± 0.06  (seeds: 99.21, 99.21, 99.33)
+
+== (C) depth=1, heads sweep (3 seeds) ==
+   1 block, 1 head(s): acc 98.34% ± 0.23
+   1 block, 2 head(s): acc 98.52% ± 0.20
+   1 block, 4 head(s): acc 98.99% ± 0.25

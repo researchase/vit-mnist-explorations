@@ -1,0 +1,37 @@
+Using device: cuda - NVIDIA GeForce RTX 3090
+Device: cuda
+Sample: 600 images [0, 1, 2]
+
+== Training FULL model (attention + MLP) ==
+  epoch 1: test acc 98.86%
+  epoch 2: test acc 98.70%
+  epoch 3: test acc 99.27%
+  epoch 4: test acc 99.01%
+  epoch 5: test acc 99.36%
+
+== Training ATTENTION-ONLY model (no MLP) ==
+  epoch 1: test acc 99.40%
+  epoch 2: test acc 99.49%
+  epoch 3: test acc 99.11%
+  epoch 4: test acc 99.24%
+  epoch 5: test acc 99.17%
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/attn_only_journey.html
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/attn_only_journey_grid.png
+
+============================================================
+RESULT: full (attention+MLP)  vs  attention-only (no MLP)
+============================================================
+  params:             137,795     70,979   (MLP removed: 66,816)
+  test accuracy:       99.36%     99.17%
+  final silhouette:     0.710      0.630
+
+  per-block silhouette:
+    stage          full  attn-only
+    input         0.000     -0.004
+    blk1          0.355      0.384
+    blk2          0.521      0.453
+    blk3          0.631      0.536
+    blk4          0.710      0.630
+
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/compare_full_vs_attn_only.png
+  wrote attn_only_journey.html / attn_only_journey_grid.png

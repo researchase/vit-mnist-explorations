@@ -1,0 +1,40 @@
+Using device: cuda - NVIDIA GeForce RTX 3090
+Device: cuda
+Sample: 600 images (0, 1, 2)
+
+== Untrained (random init) baseline ==
+[untrained] silhouette by stage:
+    S0: input (patch+CLS+pos)     0.000
+    block 1 after attention       0.145
+    block 1 after MLP             0.145
+    block 2 after attention       0.167
+    block 2 after MLP             0.166
+    block 3 after attention       0.158
+    block 3 after MLP             0.159
+    block 4 after attention       0.163
+    block 4 after MLP             0.164
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/pca_journey_untrained.html
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/pca_journey_untrained_grid.png
+
+== Training 3-class ViT ==
+  epoch 1: test acc 98.89%
+  epoch 2: test acc 99.05%
+  epoch 3: test acc 98.67%
+  epoch 4: test acc 99.14%
+  epoch 5: test acc 99.46%
+
+== Trained model journey ==
+[trained] silhouette by stage:
+    S0: input (patch+CLS+pos)     -0.004
+    block 1 after attention       0.412
+    block 1 after MLP             0.413
+    block 2 after attention       0.525
+    block 2 after MLP             0.525
+    block 3 after attention       0.637
+    block 3 after MLP             0.639
+    block 4 after attention       0.665
+    block 4 after MLP             0.684
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/pca_journey.html
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/pca_journey_grid.png
+
+Done. Open pca_journey.html and pca_journey_untrained.html in a browser.

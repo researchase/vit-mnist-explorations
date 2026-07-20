@@ -1,0 +1,29 @@
+Using device: cuda - NVIDIA GeForce RTX 3090
+Device: cuda
+Loaded /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/vit_mnist_3class_attn_only.pt
+  decomposition max error: 3.34e-06  (should be ~0)
+  heads/block: 4   blocks: 4
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/heads_cls_movement.png
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/heads_attention_maps.png
+  wrote /home/ashwin/claude/research/Vision-Transformer-VIT-for-MNIST/heads_importance.png
+
+  baseline accuracy: 99.17%
+  block   head   displacement  acc_drop(pp)
+  block 2    h2           8.597          0.57
+  block 1    h1           4.999          0.29
+  block 1    h3           3.836          0.29
+  block 1    h0           3.801          0.25
+  block 2    h3           3.489          0.22
+  block 2    h0           5.200          0.16
+  block 4    h0           6.302          0.13
+  block 3    h1           2.162          0.10
+  block 2    h1           4.349          0.06
+  block 3    h3           3.553          0.06
+  block 4    h3           2.540          0.03
+  block 1    h2           3.075          0.00
+  block 4    h2           2.036          0.00
+  block 3    h0           6.333         -0.03
+  block 3    h2           4.156         -0.03
+  block 4    h1           6.937         -0.03
+
+Done.

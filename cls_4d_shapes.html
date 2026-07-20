@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>CLS in 4-D · true 3D shapes</title>
+<style>
+  :root{--bg:#080b10;--txt:#e6edf3;--dim:#8b97a5;--line:#2a3441;--gold:#ffd166}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
+    font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  #c{position:fixed;inset:0;display:block}
+  .card{position:fixed;background:#0d1219dd;border:1px solid var(--line);border-radius:11px;
+    padding:11px 14px;backdrop-filter:blur(6px)}
+  #hud{top:14px;left:14px;max-width:330px}
+  #hud h1{margin:0;font-size:15px}
+  #hud .stage{font-size:18px;font-weight:700;color:var(--gold);margin-top:6px}
+  #hud .sil{color:var(--dim);font-size:12px}
+  #hud .sub{color:var(--dim);font-size:11px;margin-top:6px}
+  #nav{bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center}
+  #nav button{background:#161b22;color:var(--txt);border:1px solid var(--line);border-radius:8px;
+    padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600}
+  #nav button:hover{border-color:var(--gold)}
+  #nav .cnt{color:var(--dim);min-width:44px;text-align:center;font-size:12px}
+  #legend{top:14px;right:14px;font-size:12px}
+  #legend .row{display:flex;align-items:center;gap:8px;margin:3px 0}
+  #legend .g{width:16px;height:16px;display:inline-block;border-radius:3px;background:#556}
+  #bar{margin-top:9px;width:150px;height:12px;border-radius:3px;
+    background:linear-gradient(90deg,#000083,#0000ff,#00ffff,#ffff00,#ff0000,#800000)}
+  #bar+.rng{display:flex;justify-content:space-between;color:var(--dim);font-size:10px;width:150px}
+  #hint{position:fixed;bottom:14px;right:16px;color:var(--dim);font-size:11px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="card" id="hud">
+  <h1>CLS token in raw 4-D</h1>
+  <div class="stage" id="stageName">—</div>
+  <div class="sil" id="sil"></div>
+  <div class="sub">position = dims 0,1,2 · colour = dim 3 (blue→red) · shape = class.
+    All four dimensions, no projection.</div>
+</div>
+<div class="card" id="legend">
+  <div class="row"><span class="g" id="g0"></span> digit 0 · sphere</div>
+  <div class="row"><span class="g" id="g1"></span> digit 1 · cube</div>
+  <div class="row"><span class="g" id="g2"></span> digit 2 · pyramid</div>
+  <div style="margin-top:8px;color:var(--dim);font-size:11px">dim 3</div>
+  <div id="bar"></div><div class="rng"><span id="d3lo"></span><span id="d3hi"></span></div>
+  <div style="margin-top:9px;color:var(--dim);font-size:11px">grid walls</div>
+  <div class="row"><span class="g" id="w0"></span> floor (dims 0–2)</div>
+  <div class="row"><span class="g" id="w1"></span> back wall</div>
+  <div class="row"><span class="g" id="w2"></span> side wall</div>
+  <div style="margin-top:9px;color:var(--dim);font-size:11px">head axes (dim_head=1)</div>
+  <div class="row"><span class="g" id="a0"></span> head 0</div>
+  <div class="row"><span class="g" id="a1"></span> head 1</div>
+  <div class="row"><span class="g" id="a2"></span> head 2</div>
+  <div class="row"><span class="g" id="a3"></span> head 3</div>
+  <div style="color:var(--dim);font-size:10px;margin-top:3px">bright = the axis this stage adds</div>
+</div>
+<div class="card" id="nav">
+  <button id="prev">← Prev</button>
+  <span class="cnt" id="cnt"></span>
+  <button id="play">▶ Play</button>
+  <button id="next">Next →</button>
+  <label style="color:var(--dim);font-size:11px;margin-left:10px">size
+    <input id="size" type="range" min="0.08" max="1.4" step="0.02" value="0.5"
+     style="vertical-align:middle;width:90px"></label>
+  <label style="color:var(--dim);font-size:11px;margin-left:6px">opacity
+    <input id="opac" type="range" min="0.12" max="1" step="0.04" value="0.6"
+     style="vertical-align:middle;width:80px"></label>
+</div>
+<div id="hint">drag to orbit · scroll to zoom</div>
+
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script src="cls4d_data.js"></script>
+<script>
+const D=CLS4D, S=D.stages.length, N=D.labels.length;
+const clamp01=t=>Math.max(0,Math.min(1,t));
+function jet(t){t=clamp01(t);const f=4*t;
+  return new THREE.Color(clamp01(Math.min(f-1.5,-f+4.5)),
+                         clamp01(Math.min(f-0.5,-f+3.5)),
+                         clamp01(Math.min(f+0.5,-f+2.5)));}
+
+/* ---- scale positions (dims 0,1,2) into a fixed cube, uniform scale ---- */
+let lo=[1e9,1e9,1e9], hi=[-1e9,-1e9,-1e9];
+for(let s=0;s<S;s++)for(let i=0;i<N;i++)for(let d=0;d<3;d++){
+  const v=D.coords[s][i][d]; if(v<lo[d])lo[d]=v; if(v>hi[d])hi[d]=v;}
+const ctr=lo.map((v,d)=>(v+hi[d])/2);
+const span=Math.max(...lo.map((v,d)=>hi[d]-v))||1, SCALE=34/span;
+const P=(s,i)=>new THREE.Vector3(...[0,1,2].map(d=>(D.coords[s][i][d]-ctr[d])*SCALE));
+const COL=(s,i)=>jet((D.coords[s][i][3]-D.d3min)/(D.d3max-D.d3min||1));
+
+/* ---- scene ---- */
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x080b10);
+scene.fog=new THREE.Fog(0x080b10,80,220);
+const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.1,2000);
+camera.position.set(34,26,52);
+const renderer=new THREE.WebGLRenderer({canvas:c,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight);
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;
+scene.add(new THREE.AmbientLight(0xffffff,0.65));
+const dl=new THREE.DirectionalLight(0xffffff,0.7); dl.position.set(30,50,40); scene.add(dl);
+const dl2=new THREE.DirectionalLight(0x88aaff,0.25); dl2.position.set(-40,-20,-30); scene.add(dl2);
+
+/* dotted grid cage — 3 coloured walls (floor / back / side), points sit inside */
+const GH=18, GSTEP=4.5;
+const WALLC=[0x2f8f8f, 0x8a72d6, 0xc98a3a];   // floor(xz) · back(xy) · side(yz)
+function gridPlane(plane, at, color){
+  const pts=[];
+  for(let t=-GH;t<=GH+1e-6;t+=GSTEP){
+    if(plane==='xz'){pts.push(-GH,at,t, GH,at,t, t,at,-GH, t,at,GH);}
+    if(plane==='xy'){pts.push(-GH,t,at, GH,t,at, t,-GH,at, t,GH,at);}
+    if(plane==='yz'){pts.push(at,-GH,t, at,GH,t, at,t,-GH, at,t,GH);}
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts,3));
+  const ls=new THREE.LineSegments(g, new THREE.LineDashedMaterial(
+    {color, dashSize:1.1, gapSize:1.5, transparent:true, opacity:0.5}));
+  ls.computeLineDistances(); return ls;
+}
+scene.add(gridPlane('xz',-GH,WALLC[0]));   // floor
+scene.add(gridPlane('xy',-GH,WALLC[1]));   // back wall
+scene.add(gridPlane('yz',-GH,WALLC[2]));   // side wall
+document.getElementById('w0').style.background='#'+new THREE.Color(WALLC[0]).getHexString();
+document.getElementById('w1').style.background='#'+new THREE.Color(WALLC[1]).getHexString();
+document.getElementById('w2').style.background='#'+new THREE.Color(WALLC[2]).getHexString();
+
+/* ---- per-class instanced meshes: sphere / cube / tetra ---- */
+const GEO=[new THREE.SphereGeometry(0.62,18,12),
+           new THREE.BoxGeometry(1.0,1.0,1.0),
+           new THREE.ConeGeometry(0.92,1.4,4)];   // 4-sided cone = square pyramid
+const QUAT=[new THREE.Quaternion(),
+            new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6,0.8,0)),
+            new THREE.Quaternion().setFromEuler(new THREE.Euler(0.12,0.78,0))];
+const idx=[[],[],[]];             // global point indices per class
+for(let i=0;i<N;i++) idx[D.labels[i]].push(i);
+const meshes=[], cur=[], curCol=[];
+for(let ci=0;ci<3;ci++){
+  const m=new THREE.InstancedMesh(GEO[ci],
+    new THREE.MeshLambertMaterial({transparent:true,opacity:0.6,depthWrite:false}),idx[ci].length);
+  cur.push(idx[ci].map(i=>P(0,i)));            // start at stage 0
+  curCol.push(idx[ci].map(i=>COL(0,i).clone()));
+  meshes.push(m); scene.add(m);
+}
+/* ---- head-direction arrows (each head moves points along one fixed axis) ---- */
+const ARROWC=[0xff5d5d, 0x54e08a, 0x5db2ff, 0xffcf4d];
+const anchor=P(0,0);                                    // common start point of the journey
+const arrows=[];
+if(Array.isArray(CLS4D.headDirs)){                       // guard: skip arrows if data lacks head dirs
+  for(let h=0;h<CLS4D.headDirs.length;h++){
+    const d=CLS4D.headDirs[h];
+    const dir=new THREE.Vector3(d[0],d[1],d[2]).normalize();
+    const a=new THREE.ArrowHelper(dir, anchor.clone(), 13, ARROWC[h], 2.6, 1.5);
+    a.line.material.transparent=true; a.cone.material.transparent=true;
+    arrows.push(a); scene.add(a);
+    const sw=document.getElementById('a'+h); if(sw) sw.style.background='#'+new THREE.Color(ARROWC[h]).getHexString();
+  }
+}
+function updateArrows(){
+  const active = (stage>=2 && stage<=5) ? stage-2 : -1;  // stages 2..5 == +head 0..3
+  arrows.forEach((a,h)=>{
+    const on = h===active;
+    a.line.material.opacity=on?1:0.22; a.cone.material.opacity=on?1:0.22;
+    a.setLength(on?17:12, on?3.2:2.4, on?1.9:1.4);
+  });
+}
+
+let markerScale=0.5;
+const scaleV=new THREE.Vector3(), tmp=new THREE.Matrix4();
+document.getElementById('size').oninput=e=>{markerScale=+e.target.value;};
+document.getElementById('opac').oninput=e=>{const v=+e.target.value;
+  meshes.forEach(m=>{m.material.opacity=v;m.material.transparent=v<1;m.material.depthWrite=v>=1;
+    m.material.needsUpdate=true;});};
+document.getElementById('g0').style.background='#'+jet(0.5).getHexString();
+[0,1,2].forEach(k=>document.getElementById('g'+k).style.background=D.classColors[k]);
+document.getElementById('d3lo').textContent=D.d3min.toFixed(1);
+document.getElementById('d3hi').textContent=D.d3max.toFixed(1);
+
+/* ---- stage stepping with smooth morph ---- */
+let stage=0;
+function setStage(s){stage=Math.max(0,Math.min(S-1,s));
+  document.getElementById('stageName').textContent=D.stages[stage];
+  document.getElementById('sil').textContent=D.sil[stage]!=null?`silhouette (all 4 dims) = ${D.sil[stage].toFixed(3)}`:'';
+  document.getElementById('cnt').textContent=(stage+1)+' / '+S;
+  document.getElementById('prev').disabled=stage===0;
+  document.getElementById('next').disabled=stage===S-1;
+  updateArrows();
+}
+document.getElementById('prev').onclick=()=>{stopPlay();setStage(stage-1);};
+document.getElementById('next').onclick=()=>{stopPlay();setStage(stage+1);};
+let playing=null;
+function stopPlay(){if(playing){clearInterval(playing);playing=null;document.getElementById('play').textContent='▶ Play';}}
+document.getElementById('play').onclick=()=>{
+  if(playing){stopPlay();return;}
+  if(stage>=S-1)setStage(0);
+  document.getElementById('play').textContent='❚❚ Pause';
+  playing=setInterval(()=>{if(stage>=S-1){stopPlay();return;}setStage(stage+1);},1100);
+};
+addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();stopPlay();setStage(stage+1);}
+  if(e.key==='ArrowLeft'){e.preventDefault();stopPlay();setStage(stage-1);}});
+
+const tc=new THREE.Color();
+function loop(){
+  requestAnimationFrame(loop);
+  scaleV.setScalar(markerScale);
+  for(let ci=0;ci<3;ci++){
+    const m=meshes[ci], ids=idx[ci];
+    for(let k=0;k<ids.length;k++){
+      const tgt=P(stage,ids[k]); cur[ci][k].lerp(tgt,0.14);
+      tmp.compose(cur[ci][k],QUAT[ci],scaleV); m.setMatrixAt(k,tmp);
+      tc.copy(COL(stage,ids[k])); curCol[ci][k].lerp(tc,0.14); m.setColorAt(k,curCol[ci][k]);
+    }
+    m.instanceMatrix.needsUpdate=true; m.instanceColor.needsUpdate=true;
+  }
+  controls.update(); renderer.render(scene,camera);
+}
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);});
+setStage(0); loop();
+</script>
+</body>
+</html>
