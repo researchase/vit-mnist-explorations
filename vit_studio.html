@@ -70,6 +70,20 @@
   .bar .v{font-size:10px;color:var(--dim)}
   #barsblk.hl #bars{outline:2px solid var(--gold);border-radius:4px}
   #verdict{font-size:13px;margin-top:4px}
+  /* guided lesson card */
+  #lessonblk{margin-top:10px}
+  #lesson{max-height:38vh;overflow-y:auto;background:#0d1219;border:1px solid var(--line);
+    border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.6}
+  #lesson::-webkit-scrollbar{width:7px}
+  #lesson::-webkit-scrollbar-thumb{background:#2a3441;border-radius:4px}
+  #lesson h3{margin:0 0 6px;font-size:13px;color:var(--gold)}
+  #lesson p{margin:0 0 8px}
+  #lesson .f{font-family:ui-monospace,Menlo,monospace;color:#9fd6ff;display:block;
+    background:#0b0f14;border-radius:6px;padding:5px 8px;margin:6px 0;font-size:11px}
+  #lesson .try{border:1px solid var(--gold);border-radius:8px;padding:7px 10px;margin-top:8px;
+    background:#161207}
+  #lesson .try b{color:var(--gold)}
+  #lesson em{color:#c9d5e0}
   /* 3d panels */
   #netwrap,#clswrap{position:relative;overflow:hidden}
   #netc,#clsc{position:absolute;inset:0;width:100%;height:100%;display:block}
@@ -122,6 +136,8 @@
       </div></div>
     <div class="blk" id="barsblk"><div class="cap">prediction</div>
       <div id="bars"></div><div id="verdict"></div></div>
+    <div class="blk" id="lessonblk"><div class="cap">lesson · <span id="lessonN"></span></div>
+      <div id="lesson"></div></div>
   </div>
 
   <div class="divider" id="divL"></div>
@@ -177,7 +193,7 @@
 <script>
 /* ================= shared: live forward pass (verified vs PyTorch) ================= */
 const Wt=NET.weights, CCC=NET.classColors, MEAN=0.1307, STD=0.3081;
-const CF=NET.cfg, G=CF.grid, PP=CF.patch, T=CF.tokens, PD=CF.patchDim;
+const CF=NET.cfg, G=CF.grid, PP=CF.patch, T=CF.tokens, PD=CF.patchDim, NP=CF.patches;
 const mv=(W,x,b)=>W.map((row,i)=>row.reduce((s,w,j)=>s+w*x[j], b?b[i]:0));
 function lnv(x,g,b){const n=x.length,m=x.reduce((a,v)=>a+v,0)/n;
   const v=x.reduce((a,q)=>a+(q-m)*(q-m),0)/n, inv=1/Math.sqrt(v+1e-5);
@@ -304,6 +320,7 @@ let drawing=false, rebuildTimer=null;
 function afterInputChange(){
   R=forward(px); liveStages=clsStagesOf(R);
   paint2D(); updateLiveMarker();
+  if(typeof renderLesson==='function')renderLesson(true);   // refresh live numbers, keep scroll
   clearTimeout(rebuildTimer);
   rebuildTimer=setTimeout(()=>{recolorNet();},140);   // debounce heavy 3D recolor
 }
@@ -611,6 +628,177 @@ function renderStepBubble(){
   sb.innerHTML=`<span class="x" onclick="this.parentElement.style.display='none'">✕</span>
     <b>${STEPS[stepIdx].t}</b><span class="f">${m.f}</span>${m.w}`;
 }
+
+/* ============ guided lesson (bottom-left card, scrolls if long) ============ */
+const LESSONS=[
+()=>`<h3>Welcome — a complete Vision Transformer, small enough to see whole</h3>
+<p>This model classifies handwritten 0/1/2 with just <b>${NET.total} weights</b> (${NET.acc}% accuracy).
+A production ViT works the same way with millions — here, nothing is hidden.</p>
+<p><em>Left</em>: the live numbers. <em>Middle</em>: every weight as a cube, data flowing left→right.
+<em>Right</em>: the journey of the CLS token — the 4 numbers that become the answer.</p>
+<p>Use <b>→</b> (or Space) to walk the forward pass step by step. Each step: this card explains the
+concept, the machine highlights the calculation, and the right panel shows its effect.</p>
+<div class="try"><b>Try:</b> draw a digit in the pad above (or click a preset), watch all three
+panels react — then press <b>→</b> to begin.</div>`,
+
+()=>`<h3>Step 1 · The image becomes a sentence</h3>
+<p>A transformer reads <em>sequences of tokens</em> — words, for text. A ViT's trick: chop the image
+into patches and treat <b>each patch as a word</b>. Your 28×28 digit becomes a ${G}×${G} grid of
+${PP}×${PP}-pixel patches = <b>${NP} tokens</b>.</p>
+<p>No weights are involved — pure slicing. But the choice matters: we tested 7px vs 4px patches at
+identical parameter count, and finer patches won (98.0%→98.8%) because less information is crushed
+per token before the model can look at it.</p>
+<div class="try"><b>Try:</b> compare the input pad with the patches panel above — find which patches
+hold ink and which are empty background. Those empty ones still become tokens!</div>`,
+
+()=>`<h3>Step 2 · Embedding — ${PD} pixels become 4 numbers</h3>
+<p>Each patch's ${PD} pixels are multiplied by one small learned matrix:</p>
+<span class="f">token = W·pixels + b&nbsp;&nbsp;&nbsp;(W is 4×${PD} — the same W for every patch)</span>
+<p>This is the <em>only</em> place pixels enter the network. Whatever W discards is gone forever —
+the information bottleneck. From here on, the entire model lives in vectors of length <b>4</b>.</p>
+<p>In the machine panel, the gold pulse shows each token cell being computed from its weight row.</p>
+<div class="try"><b>Try:</b> hover any cell in the <em>tokens</em> sheet (middle panel) — the tooltip
+shows the real dot product: the 3 biggest pixel×weight terms and the total. The cyan cells are the
+weight row that fed it.</div>`,
+
+()=>`<h3>Step 3 · The CLS token — a blank passenger</h3>
+<p>One extra token is prepended: <b>CLS</b> (“classification”). It's just 4 learned numbers —
+<span class="f">CLS = [${Wt.cls.map(v=>v.toFixed(2)).join(', ')}]</span>
+identical for <em>every</em> image, carrying no pixel information at all.</p>
+<p>Why? The final prediction will be read from this token <em>alone</em>. Attention will let it
+<em>interrogate</em> the ${NP} patch tokens and accumulate evidence. Think of it as an empty
+notebook sent through the machine to collect the answer.</p>
+<div class="try"><b>Try:</b> hover the top row of the tokens sheet — “learned, no inputs”, and no
+cyan contributors light up. Redraw the digit: every other row changes, this one never does.</div>`,
+
+()=>`<h3>Step 4 · Position — telling attention <em>where</em></h3>
+<p>Attention has no built-in sense of order — shuffle the tokens and it wouldn't notice. So each
+of the ${T} slots gets its own learned 4-vector <em>added on</em>:</p>
+<span class="f">x<sub>i</sub> = token<sub>i</sub> + pos<sub>i</sub></span>
+<p>Note: <em>added into the same 4 channels</em>, not stored separately. Content and location are
+superimposed — every number now carries a blend of “what” and “where”. With ${NP} small patches
+this table (${T}×4 = <b>${T*4} weights</b>) is the single biggest block in the model: position
+matters more when patches are tiny.</p>
+<div class="try"><b>Try:</b> hover matching cells in <em>tokens</em>, <em>pos</em> and <em>+pos</em> —
+the tooltip shows the literal addition, e.g. token + position = result.</div>`,
+
+()=>`<h3>Step 5 · LayerNorm — keeping numbers civilised</h3>
+<p>Before attention, each token's 4 numbers are rescaled to mean 0, variance 1, then stretched and
+shifted by learned γ and β:</p>
+<span class="f">x̂ = γ·(x−μ)/σ + β</span>
+<p>Without this, values drift to extremes as they flow through layers and training destabilises.
+It costs only 8 weights. Remember this formula — the <em>same</em> operation produces a dramatic
+“explosion” at step 14, for a reason worth waiting for.</p>
+<div class="try"><b>Try:</b> hover an <em>LN</em> cell — the tooltip shows the actual μ and σ
+computed from that token's row, and the γ, β applied.</div>`,
+
+()=>`<h3>Step 6 · Query, Key, Value — every token gets three roles</h3>
+<p>One 12×4 matrix turns each token into three 4-vectors: a <b>query</b> (“what am I looking
+for?”), a <b>key</b> (“what do I contain?”), and a <b>value</b> (“what will I hand over if
+chosen?”). The search-engine metaphor: queries are searched against keys; values are the results.</p>
+<p>Here's this model's special clarity: dim 4 ÷ 4 heads = <b>dim_head 1</b>. Each head's q, k, v
+are <em>single scalars</em> per token — head h simply owns column h. Four heads = four independent
+one-number lenses on every token.</p>
+<div class="try"><b>Try:</b> hover a <em>Q</em> cell — the full 4-term dot product with real
+numbers, nothing hidden. Columns are heads: Q[·,2] is everything head 2 knows how to ask.</div>`,
+
+()=>`<h3>Step 7 · Attention — the only place tokens meet</h3>
+<p>Everything so far processed each token separately. Attention is where they compare:</p>
+<span class="f">score(i,j) = q<sub>i</sub>·k<sub>j</sub> → softmax across j → weights that sum to 1</span>
+<p>Each ${T}×${T} sheet has <b>zero parameters</b> — it's computed fresh from your image. Row i
+says where token i looks. <b>Row 0 is the CLS row</b>: where the answer-collector is looking. That
+row, reshaped back to ${G}×${G}, is exactly the coloured overlay on the digit (left panel) — you
+are literally seeing where the model looks.</p>
+<div class="try"><b>Try:</b> look at “where CLS looks” above — 4 colours = 4 heads. Toggle heads
+off one by one. Then hover an attention cell in the machine: q×k with both live values.</div>`,
+
+()=>`<h3>Step 8 · Head 0 reads — and the answer starts to exist</h3>
+<p>Head 0 blends all ${T} value-scalars using its CLS attention row:</p>
+<span class="f">read₀ = Σ<sub>j</sub> A₀[CLS,j]·v<sub>j</sub>&nbsp;&nbsp;→ right now it attends most to ${topPatch(0)}</span>
+<p>That single number then pushes the CLS point along head 0's <b>fixed direction</b> (the red
+arrow, right panel). Every image gets pushed along the <em>same line</em> — only the distance
+differs. Watch the right panel: a cloud that was one dot is now spread along <b>one axis</b>.
+This is the rank-1 geometry of a 1-dim head, visible.</p>
+<div class="try"><b>Try:</b> want to see the individual values? Hover the <em>attn out</em> column's
+top cell [0,0] — the tooltip shows Σ A·v with the three biggest attention×value products. The 100
+cyan cells are its entire supply chain: head 0's CLS row + the V column.</div>`,
+
+()=>`<h3>Step 9 · Head 1 — a second axis opens</h3>
+<p>Same mechanism, different learned direction — head 1's axis sits ≈144° from head 0's. The
+line of points opens into a <b>plane</b>. Right now head 1 attends most to ${topPatch(1)}.</p>
+<p>Key insight: a head with dim_head 1 can <em>only ever add one dimension</em> — its output is
+one scalar × one fixed direction. Separation is built axis by axis, head by head. We measured it:
+effective dimensionality goes 1.0 → 1.1 → 1.7 → 1.8 across the four heads.</p>
+<div class="try"><b>Try:</b> in the overlay, turn off all heads except 1 — is it looking somewhere
+different from head 0? Drag the right panel to see the plane edge-on, then face-on.</div>`,
+
+()=>`<h3>Step 10 · Head 2 — depth, and the colour dimension</h3>
+<p>Third head, third axis (currently attending to ${topPatch(2)}). But watch the right panel's
+<b>colours</b>, not just positions: head 2 pushes strongly on <em>dim 3</em>, which we render as
+blue→red. Movement in the 4th dimension looks like points <em>changing colour</em> in place.</p>
+<p>This is why we show colour at all: the CLS lives in 4-D, your screen has 3 axes — colour is the
+honest way to show the dimension that position can't.</p>
+<div class="try"><b>Try:</b> step back to Head 1 and forward again, watching only colours in the
+right panel. Then hover attn out [0,2] to see head 2's sum with live numbers.</div>`,
+
+()=>`<h3>Step 11 · Head 3 — the coordinate system is complete</h3>
+<p>Fourth axis (attending to ${topPatch(3)}). Four heads, four nearly-orthogonal fixed directions —
+together they've built the coordinate system the answer lives in. The cloud is now a 3-D structure
+with colour variation: all four dimensions in use, three classes beginning to separate.</p>
+<p>In bigger ViTs, heads specialise the same way — edge-detectors, position-anchors, shape-matchers.
+One of our heads barely varies its gaze regardless of input: a “register” head that anchors rather
+than reads. See if you can spot which colour barely moves in the overlay as you redraw.</p>
+<div class="try"><b>Try:</b> draw different digits and watch which overlay colour stays put — that's
+the register head. The others chase your strokes.</div>`,
+
+()=>`<h3>Step 12 · Output projection + residual — write it back</h3>
+<p>The four head-readings are mixed by a 4×4 matrix and <b>added onto</b> each token:</p>
+<span class="f">x = x + W<sub>o</sub>·[read₀ read₁ read₂ read₃] + b<sub>o</sub></span>
+<p>The “+ x” is the <b>residual connection</b> — attention doesn't replace a token, it <em>amends</em>
+it. The token stream flows through the whole network, with each layer writing corrections onto it.
+(That additive structure is exactly why we could decompose the CLS journey head-by-head.)</p>
+<div class="try"><b>Try:</b> hover a <em>+resid</em> cell: tooltip shows posed + the four w×head
+terms + bias = new value. The cyan contributors span three sheets.</div>`,
+
+()=>`<h3>Step 13 · The final LayerNorm — a controlled explosion</h3>
+<p>The ${NP} patch tokens are discarded — only CLS goes on. It's normalised with the same formula
+as step 5… but look at the right panel: the cloud <b>blows apart</b> (variance ×9). Why?</p>
+<span class="f">(x−μ)/σ × γ&nbsp;&nbsp;— σ is small (the 4 numbers are close), and γ≈2.6 is learned</span>
+<p>Dividing by a small σ inflates; γ amplifies further — but <em>anisotropically</em>: training
+aimed the stretch at exactly the two axes that separate 0/1/2, and squashed the rest. It's not
+noise — it's a learned magnifying glass positioned right before the classifier's eyes.</p>
+<div class="try"><b>Try:</b> flip between steps 12 ↔ 13 watching the right panel — same points,
+one normalisation apart. Hover a <em>CLS·LN</em> cell for the real μ, σ, γ, β.</div>`,
+
+()=>`<h3>Step 14 · Classification — three dot products</h3>
+<p>The entire image is now <b>4 numbers</b>. Each class scores its match with one dot product:</p>
+<span class="f">logit<sub>k</sub> = w<sub>k</sub>·ŷ + b<sub>k</sub> → softmax → probabilities</span>
+<p>Currently: ${R.probs.map((p,k)=>`P(${k})=${(p*100).toFixed(1)}%`).join(' · ')}. The three
+class-weight rows are, geometrically, three directions in 4-D — the classifier just asks which
+direction the CLS vector leans toward. That's why the clusters in the right panel <em>are</em> the
+prediction: position = answer.</p>
+<div class="try"><b>Try:</b> hover a prediction bar cube in the machine — the tooltip expands the
+whole logit: four w×ŷ terms + bias = logit → softmax %. Check it against the bars above.</div>`,
+
+()=>`<h3>You've seen every weight work · what now?</h3>
+<p>That was the complete forward pass: ${PD*4}+4 embed · 4 CLS · ${T*4} pos · 8 LN · 48 QKV ·
+20 out · 8 LN · 15 classify = <b>${NET.total} weights</b>. No hidden machinery — you hovered the
+actual numbers.</p>
+<p>The big ideas you now own: <em>images as token sequences · embedding as lossy compression ·
+content+position superposition · attention as the only token-mixing · one axis per head (rank-1) ·
+residual streams · LayerNorm as learned magnifier · classification as geometry</em>.</p>
+<div class="try"><b>Try:</b> draw a 0 that's almost a 2 (open the loop at the top). Watch the
+probability bars fight, the octahedron hesitate between clusters, and the overlay show which
+patches the heads use to decide. Then walk the timeline again on <em>your</em> ambiguous digit —
+the machine never changes, only the data flowing through it.</div>`,
+];
+function renderLesson(preserveScroll){
+  const el=document.getElementById('lesson');
+  const sc=preserveScroll?el.scrollTop:0;
+  document.getElementById('lessonN').textContent=`step ${stepIdx+1} / ${STEPS.length} — ${STEPS[stepIdx].t}`;
+  el.innerHTML=LESSONS[stepIdx]();
+  el.scrollTop=sc;
+}
 let stepIdx=0,tick=0;
 let hoverId=-1,hoverContribs=null;
 const camPos=new THREE.Vector3(),camTgt=new THREE.Vector3();
@@ -647,6 +835,7 @@ function applyStep(){
   const fs=st.focus===null?null:new Set(st.focus);
   labelsN.forEach(l=>{l.el.style.opacity=(fs===null||l.groups.some(g=>fs.has(g)))?1:(l.groups.length===0?0.9:0.22);});
   renderStepBubble();
+  renderLesson();
 }
 function go(i){stepIdx=Math.max(0,Math.min(STEPS.length-1,i));applyStep();}
 document.getElementById('prev').onclick=()=>go(stepIdx-1);
