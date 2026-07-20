@@ -105,7 +105,8 @@
 <header>
   <h1>ViT Studio</h1>
   <span class="sub"><b id="ptotal"></b> weights · acc <b id="accv"></b> · draw or pick a digit — every view updates live</span>
-  <span style="margin-left:auto">digit <span id="btns"></span></span>
+  <button id="mlpBtn" title="switch between the attention-only model and the one trained with a feedforward MLP" style="margin-left:auto">MLP: off</button>
+  <span>digit <span id="btns"></span></span>
   <button id="clear">clear</button>
 </header>
 
@@ -190,10 +191,15 @@
 <script src="three.min.js"></script>
 <script src="OrbitControls.js"></script>
 <script src="net_data.js"></script>
+<script src="net_mlp_data.js"></script>
 <script src="cls4d_data.js"></script>
+<script>var CLS4D_ATTN=CLS4D;</script>
+<script src="cls4d_mlp_data.js"></script>
+<script>var CLS4D_MLP=CLS4D;</script>
 <script>
 /* ================= shared: live forward pass (verified vs PyTorch) ================= */
-const Wt=NET.weights, CCC=NET.classColors, MEAN=0.1307, STD=0.3081;
+let MLP_ON=false, ACTIVE=NET, Wt=NET.weights;
+const CCC=NET.classColors, MEAN=0.1307, STD=0.3081;
 const CF=NET.cfg, G=CF.grid, PP=CF.patch, T=CF.tokens, PD=CF.patchDim, NP=CF.patches;
 const mv=(W,x,b)=>W.map((row,i)=>row.reduce((s,w,j)=>s+w*x[j], b?b[i]:0));
 function lnv(x,g,b){const n=x.length,m=x.reduce((a,v)=>a+v,0)/n;
@@ -220,17 +226,26 @@ function forward(px){
     for(let h=0;h<4;h++)for(let j=0;j<T;j++)o[h]+=A[h][i][j]*V[j][h];
     attnOut.push(o);}
   const resid=posed.map((t,i)=>{const d=mv(Wt.outW,attnOut[i],Wt.outB);return t.map((v,k)=>v+d[k]);});
-  const clsN=lnv(resid[0],Wt.headLnW,Wt.headLnB);
+  let finalTok=resid, extra={};
+  if(MLP_ON){                                       // feedforward sublayer (per token, nonlinear)
+    const mlpNorm=resid.map(t=>lnv(t,Wt.mlpLnW,Wt.mlpLnB));
+    const mlpHidden=mlpNorm.map(t=>mv(Wt.mlpW1,t,Wt.mlpB1).map(v=>Math.max(0,v)));   // ReLU, dim 8
+    const mlpDelta=mlpHidden.map(t=>mv(Wt.mlpW2,t,Wt.mlpB2));
+    const residMlp=resid.map((t,i)=>t.map((v,d)=>v+mlpDelta[i][d]));
+    finalTok=residMlp; extra={mlpNorm,mlpHidden,mlpDelta,residMlp};
+  }
+  const clsN=lnv(finalTok[0],Wt.headLnW,Wt.headLnB);
   const logits=mv(Wt.clsW,clsN,Wt.clsB);
-  return {norm,toks,posed,normed,Q,K,V,A,attnOut,resid,clsN,logits,probs:softmax(logits)};
+  return Object.assign({norm,toks,posed,normed,Q,K,V,A,attnOut,resid,clsN,logits,probs:softmax(logits)},extra);
 }
 /* the CLS journey stages of the CURRENT input (matches cls4d stage order) */
 function clsStagesOf(R){
   const s=[R.posed[0].slice()];
   let p=R.posed[0].map((v,d)=>v+Wt.outB[d]); s.push(p.slice());
   for(let h=0;h<4;h++){p=p.map((v,o)=>v+R.attnOut[0][h]*Wt.outW[o][h]); s.push(p.slice());}
+  if(MLP_ON&&R.residMlp) s.push(R.residMlp[0].slice());   // the nonlinear MLP jump
   s.push(R.clsN.slice());
-  return s;                                   // 7 stages × 4 dims
+  return s;                                   // 7 stages (8 with MLP) × 4 dims
 }
 
 let px=NET.examples[0].px.slice();
@@ -464,6 +479,11 @@ const dlN=new THREE.DirectionalLight(0xffffff,0.55); dlN.position.set(40,80,60);
 const TS=0.42, AS=0.18;
 const X={img:-14,patchW:2,tok:12,pos:20,posed:28,normed:36,qkvW:44,Q:52,K:58,V:64,
          attn:76,attnOut:90,outW:96,resid:104,clsNorm:112,clsW:118,prob:126};
+function layoutX(){                        // shift the tail right and add MLP slots when MLP is on
+  if(MLP_ON){X.mlpNorm=112;X.mlpW1=118;X.mlpHidden=125;X.mlpW2=133;X.residMlp=140;
+             X.clsNorm=150;X.clsW=157;X.prob=165;}
+  else {X.clsNorm=112;X.clsW=118;X.prob=126;}
+}
 const clamp01=t=>Math.max(0,Math.min(1,t));
 function wcol(v,n){const t=clamp01(Math.abs(v)/n),c=new THREE.Color();
   if(v>=0)c.setRGB(0.27+0.66*t,0.27-0.02*t,0.23-0.05*t);else c.setRGB(0.23,0.28+0.05*t,0.30+0.6*t);return c;}
@@ -472,9 +492,11 @@ function acol(v,n){const t=clamp01(Math.abs(v)/n),c=new THREE.Color();
 const to2d=a=>Array.isArray(a[0])?a:[a];
 
 let cellsN=[], byKeyN={}, meshN=null, labelsN=[], imgMesh=null, groupN=null;
-function actArrays(){return {tok:R.toks,pos:null,posed:R.posed,normed:R.normed,
+function actArrays(){const a={tok:R.toks,pos:null,posed:R.posed,normed:R.normed,
   Q:R.Q,K:R.K,V:R.V,attn0:R.A[0],attn1:R.A[1],attn2:R.A[2],attn3:R.A[3],
-  attnOut:R.attnOut,resid:R.resid,clsNorm:[R.clsN]};}
+  attnOut:R.attnOut,resid:R.resid,clsNorm:[R.clsN]};
+  if(MLP_ON){a.mlpNorm=R.mlpNorm;a.mlpHidden=R.mlpHidden;a.residMlp=R.residMlp;}
+  return a;}
 function addSheet(arr2d,x,o){
   const A2=to2d(arr2d),rows=A2.length,cols=A2[0].length;
   const s=o.step||0.85,cell=s*0.82,thin=o.thin||0.42;
@@ -522,6 +544,13 @@ function buildNet(){
   addSheet(R.attnOut,X.attnOut,{id:'attnOut',step:TS}); addLabel('attn out','',X.attnOut,T*TS/2+2,['attnOut']);
   addSheet(Wt.outW,X.outW,{id:'outW',weight:1,step:0.9}); addLabel('out W','20 w',X.outW,5,['outW']);
   addSheet(R.resid,X.resid,{id:'resid',step:TS}); addLabel('+resid','',X.resid,T*TS/2+2,['resid']);
+  if(MLP_ON){
+    addSheet(R.mlpNorm,X.mlpNorm,{id:'mlpNorm',step:TS}); addLabel('MLP·LN','',X.mlpNorm,T*TS/2+2,['mlpNorm']);
+    addSheet(Wt.mlpW1,X.mlpW1,{id:'mlpW1',weight:1,step:0.9}); addLabel('MLP W1','4→8·40w',X.mlpW1,9,['mlpW1']);
+    addSheet(R.mlpHidden,X.mlpHidden,{id:'mlpHidden',step:TS}); addLabel('hidden·ReLU',T+'×8',X.mlpHidden,T*TS/2+2,['mlpHidden']);
+    addSheet(Wt.mlpW2,X.mlpW2,{id:'mlpW2',weight:1,step:0.9}); addLabel('MLP W2','8→4·36w',X.mlpW2,7,['mlpW2']);
+    addSheet(R.residMlp,X.residMlp,{id:'residMlp',step:TS}); addLabel('+MLP','',X.residMlp,T*TS/2+2,['residMlp']);
+  }
   addSheet([R.clsN],X.clsNorm,{id:'clsNorm',step:0.9}); addLabel('CLS·LN','',X.clsNorm,3,['clsNorm']);
   addSheet(Wt.clsW,X.clsW,{id:'clsW',weight:1,step:0.9}); addLabel('cls W','15 w',X.clsW,4,['clsW']);
   for(let k=0;k<3;k++){
@@ -576,7 +605,7 @@ const ctrC=new THREE.OrbitControls(camC,renC.domElement);ctrC.enableDamping=true
 sceneC.add(new THREE.AmbientLight(0xffffff,0.65));
 const dlC=new THREE.DirectionalLight(0xffffff,0.7);dlC.position.set(30,50,40);sceneC.add(dlC);
 
-const DD=CLS4D, SC=DD.stages.length, NC=DD.labels.length;
+let DD=CLS4D_ATTN, SC=DD.stages.length; const NC=DD.labels.length;
 function jet(t){t=clamp01(t);const f=4*t;
   return new THREE.Color(clamp01(Math.min(f-1.5,-f+4.5)),clamp01(Math.min(f-0.5,-f+3.5)),
                          clamp01(Math.min(f+0.5,-f+2.5)));}
@@ -657,8 +686,8 @@ function setClsStage(s){
 function topPatch(h){let j=1,m=-1;for(let x=1;x<T;x++)if(R.A[h][0][x]>m){m=R.A[h][0][x];j=x;}
   return `patch (${((j-1)/G)|0},${(j-1)%G}) @ ${(m*100).toFixed(0)}%`;}
 const row=(g,r,n)=>Array.from({length:n},(_,c)=>({g,r,c}));
-const STEPS=[
- {t:'Overview',cap:()=>`all ${NET.total} weights + this digit's activations · orbit freely`,cam:[[-30,52,120],[52,2,0]],focus:null,cls:0},
+const STEPS_BASE=[
+ {t:'Overview',cap:()=>`all ${ACTIVE.total} weights + this digit's activations · orbit freely`,cam:[[-30,52,120],[52,2,0]],focus:null,cls:0},
  {t:'Patches',cap:()=>`28×28 → ${G}×${G} grid of ${PP}×${PP} patches (0 weights)`,cam:[[-32,6,26],[-10,0,0]],focus:[],cls:0,hl:'patchblk'},
  {t:'Patch embed',cap:()=>`${PD} px × W → 4 numbers per patch`,cam:[[-8,10,34],[7,0,0]],focus:['patchW','tok'],cls:0,hl:'patchblk',
   anim:{len:196,at:i=>{const t2=1+(i>>2),d=i&3;return [{g:'tok',r:t2,c:d},...row('patchW',d,PD)];}}},
@@ -686,11 +715,16 @@ const STEPS=[
   anim:{len:4,at:i=>[{g:'clsNorm',r:0,c:i},...row('resid',0,4)]}},
  {t:'Classify',cap:()=>'3 dot products with the 4-D CLS → softmax',cam:[[104,10,32],[120,0,0]],focus:['clsNorm','clsW','prob'],cls:6,hl:'barsblk',
   anim:{len:3,at:i=>[{g:'prob',r:i,c:0},...row('clsW',i,4),...row('clsNorm',0,4)]}},
- {t:'Done',cap:()=>`${NET.total} weights, three views, one forward pass`,cam:[[-30,52,120],[52,2,0]],focus:null,cls:6},
+ {t:'Done',cap:()=>`${ACTIVE.total} weights, three views, one forward pass`,cam:[[-30,52,120],[52,2,0]],focus:null,cls:6},
 ];
+const MLP_STEP={t:'MLP',cap:()=>'per-token feedforward 4→8→ReLU→4, added back — nonlinear reshaping',
+  cam:[[122,12,46],[134,0,0]],focus:['resid','mlpNorm','mlpW1','mlpHidden','mlpW2','residMlp'],cls:6,
+  anim:{len:T*8,at:i=>{const t2=(i/8|0)%T,d=i%8;return [{g:'mlpHidden',r:t2,c:d},...row('mlpNorm',t2,4),...row('mlpW1',d,4)];}}};
 /* jalammar-style per-step explanations (formula + why) */
-const MATHS=[
- {f:'371 weights total: 68 embed · 4 CLS · 200 pos · 8 LN · 48 QKV · 20 out · 8 LN · 15 classify',
+const MLP_MATH={f:'h = ReLU(W₁·x̂ + b₁);   x = x + W₂·h + b₂    (4 → 8 → 4)',
+  w:'The feedforward MLP — a per-token nonlinear reshaping. Unlike attention it mixes NO tokens; it warps each token\'s own 4-vector. In the right panel the CLS takes a big nonlinear lurch (mean move ~2.0, bigger than any head) yet class separation barely rises (+0.03): the MLP refines far more than it separates.'};
+const MATHS_BASE=[
+ {f:'371 attention-only / 455 with MLP · one forward pass, three synchronized views',
   w:'Everything you see is one forward pass of this tiny ViT. The three panels are three views of the same computation.'},
  {f:'28×28 image → 49 patches of 4×4 pixels',
   w:'Pure slicing, zero weights. From here on the transformer never sees pixels — only patch tokens. Like words in a sentence, each patch becomes a token.'},
@@ -731,7 +765,17 @@ function renderStepBubble(){
 }
 
 /* ============ guided lesson (bottom-left card, scrolls if long) ============ */
-const LESSONS=[
+const MLP_LESSON=()=>`<h3>MLP restored · what the feedforward does to the CLS</h3>
+<p>You removed this to get the clean "one axis per head" story — here it is back. After attention, each
+token passes through <span class="f">h = ReLU(W₁·x̂ + b₁) → x = x + W₂·h + b₂</span>
+a 4→8→4 nonlinear map applied to each token <em>independently</em> (it mixes no tokens — only attention does).</p>
+<p>Watch the right panel: attention moved the CLS in clean straight pushes (one axis per head). The MLP
+gives it a big <b>curved, nonlinear lurch</b> — mean move ~2.0, larger than any single head — but class
+separation rises only +0.03 (silhouette 0.62→0.66). It <em>reshapes</em> the vector far more than it
+<em>sorts</em> the classes: this is why cutting it lost only 0.2% accuracy.</p>
+<div class="try"><b>Try:</b> toggle <b>MLP off/on</b> (top-right) and watch this jump appear/vanish in the
+journey between the head stages and the LayerNorm. Hover a <em>+MLP</em> cell in the machine for its value.</div>`;
+const LESSONS_BASE=[
 ()=>`<h3>Welcome — a complete Vision Transformer, small enough to see whole</h3>
 <p>This model classifies handwritten 0/1/2 with just <b>${NET.total} weights</b> (${NET.acc}% accuracy).
 A production ViT works the same way with millions — here, nothing is hidden.</p>
@@ -945,9 +989,23 @@ document.getElementById('next').onclick=()=>go(stepIdx+1);
 addEventListener('keydown',e=>{
   if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();go(stepIdx+1);}
   if(e.key==='ArrowLeft'){e.preventDefault();go(stepIdx-1);}});
-STEPS.forEach((s,i)=>{const b=document.createElement('button');b.textContent=s.t;
-  b.onclick=()=>go(i);document.getElementById('chips').appendChild(b);});
-setInterval(()=>{if(STEPS[stepIdx].anim){tick++;applyStepColors();}},110);
+let STEPS,MATHS,LESSONS;
+function buildChips(){
+  const c=document.getElementById('chips');c.innerHTML='';
+  STEPS.forEach((s,i)=>{const b=document.createElement('button');b.textContent=s.t;
+    if(s.t==='MLP')b.style.borderColor='#ff9a3c';
+    b.onclick=()=>go(i);c.appendChild(b);});
+}
+function rebuildSteps(){
+  STEPS=STEPS_BASE.map(s=>Object.assign({},s,{cls:s.cls===6?SC-1:s.cls}));
+  MATHS=MATHS_BASE.slice(); LESSONS=LESSONS_BASE.slice();
+  if(MLP_ON){
+    STEPS.splice(13,0,Object.assign({},MLP_STEP,{cls:SC-2}));
+    MATHS.splice(13,0,MLP_MATH); LESSONS.splice(13,0,MLP_LESSON);
+  }
+  buildChips();
+}
+setInterval(()=>{if(STEPS[stepIdx]&&STEPS[stepIdx].anim){tick++;applyStepColors();}},110);
 
 /* explanation bubbles */
 document.querySelectorAll('.info').forEach(b=>{
@@ -986,7 +1044,8 @@ applyCols();
 const rayN=new THREE.Raycaster(),mouseN=new THREE.Vector2();
 const netTip=document.getElementById('netTip');
 function valOf(g,r,c){
-  const WMAP={patchW:Wt.patchW,pos:Wt.pos,qkvW:Wt.qkvW,outW:Wt.outW,clsW:Wt.clsW};
+  const WMAP={patchW:Wt.patchW,pos:Wt.pos,qkvW:Wt.qkvW,outW:Wt.outW,clsW:Wt.clsW,
+              mlpW1:Wt.mlpW1,mlpW2:Wt.mlpW2};
   if(g==='prob')return R.probs[r];
   if(WMAP[g])return WMAP[g][r][c];
   const acts=actArrays();
@@ -1003,7 +1062,10 @@ function contribsOf(g,r,c){
   else if(g.startsWith('attn')&&g!=='attnOut'){const h=+g.slice(4);add('Q',r,h);add('K',c,h);}
   else if(g==='attnOut'){for(let j=0;j<T;j++){add('attn'+c,r,j);add('V',j,c);}}
   else if(g==='resid'){rowA('attnOut',r,4);rowA('outW',c,4);add('posed',r,c);}
-  else if(g==='clsNorm'){rowA('resid',0,4);}
+  else if(g==='mlpNorm'){rowA('resid',r,4);}
+  else if(g==='mlpHidden'){rowA('mlpNorm',r,4);rowA('mlpW1',c,4);}
+  else if(g==='residMlp'){add('resid',r,c);rowA('mlpHidden',r,8);rowA('mlpW2',c,8);}
+  else if(g==='clsNorm'){rowA(MLP_ON?'residMlp':'resid',0,4);}
   else if(g==='prob'){rowA('clsW',r,4);rowA('clsNorm',0,4);}
   return S;
 }
@@ -1046,7 +1108,11 @@ function calcOf(g,r,c){
   if(g==='resid'){
     const terms=[0,1,2,3].map(h=>`${f2(Wt.outW[c][h])}×${f2(R.attnOut[r][h])}`).join(' + ');
     return `${f2(R.posed[r][c])} + ${terms} + ${f2(Wt.outB[c])} = ${f3(R.resid[r][c])}`;}
-  if(g==='clsNorm')return lnCalc(R.resid[0],Wt.headLnW,Wt.headLnB,c,R.clsN[c]);
+  if(g==='mlpNorm')return lnCalc(R.resid[r],Wt.mlpLnW,Wt.mlpLnB,c,R.mlpNorm[r][c]);
+  if(g==='mlpHidden'){const pre=Wt.mlpW1[c].reduce((s,w,d)=>s+w*R.mlpNorm[r][d],Wt.mlpB1[c]);
+    return `ReLU(${dot(R.mlpNorm[r].map((xv,k)=>[Wt.mlpW1[c][k],xv]),Wt.mlpB1[c],pre)}) = ${f3(R.mlpHidden[r][c])}`;}
+  if(g==='residMlp')return `${f2(R.resid[r][c])} + ${dot(R.mlpHidden[r].map((hv,h)=>[Wt.mlpW2[c][h],hv]),Wt.mlpB2[c],R.residMlp[r][c]-R.resid[r][c],3)} = ${f3(R.residMlp[r][c])}`;
+  if(g==='clsNorm')return lnCalc(MLP_ON?R.residMlp[0]:R.resid[0],Wt.headLnW,Wt.headLnB,c,R.clsN[c]);
   if(g==='prob'){
     const terms=R.clsN.map((v,d)=>`${f2(Wt.clsW[r][d])}×${f2(v)}`).join(' + ');
     return `logit = ${terms} + ${f2(Wt.clsB[r])} = ${f3(R.logits[r])} → softmax = ${(R.probs[r]*100).toFixed(1)}%`;}
@@ -1067,6 +1133,9 @@ function provOf(g,r,c,nContrib){
     sub=`${tk(r)} → ${tk(c)}: q·k = ${f3(q)}×${f3(k)} = ${f3(q*k)} → softmax row`;}
   else if(g==='attnOut')sub=`= Σⱼ A${c}[${tk(r)},j]·V[j,${c}] — head ${c}'s reading`;
   else if(g==='resid')sub='= posed + W_o·heads + b_o (residual add)';
+  else if(g==='mlpNorm')sub=`= LayerNorm of token ${r} before the MLP`;
+  else if(g==='mlpHidden')sub=`= ReLU(W1·x̂)[${c}] — hidden unit ${c} (dim 8)`;
+  else if(g==='residMlp')sub='= resid + W2·hidden + b2 (MLP residual add)';
   else if(g==='clsNorm')sub='= γ(CLS−μ)/σ + β — the classifier\'s input';
   else if(g==='prob')sub=`P(class ${r}) = softmax(clsW·ŷ)[${r}]`;
   return `<b>${g}</b>[${r},${c}] = <b>${f3(v)}</b><br>`+
@@ -1136,7 +1205,23 @@ function loop(){
   labelsN.forEach(l=>{const s=project(l.v,camN,nb.width,nb.height);
     l.el.style.display=s.vis?'block':'none';l.el.style.left=s.x+'px';l.el.style.top=s.y+'px';});
 }
+function setModel(on){
+  MLP_ON=on; ACTIVE=on?NET_MLP:NET; Wt=ACTIVE.weights;
+  DD=on?CLS4D_MLP:CLS4D_ATTN; SC=DD.stages.length; layoutX();
+  document.getElementById('ptotal').textContent=ACTIVE.total;
+  document.getElementById('accv').textContent=ACTIVE.acc+'%';
+  const btn=document.getElementById('mlpBtn'); btn.textContent='MLP: '+(on?'on':'off'); btn.classList.toggle('on',on);
+  R=forward(px); liveStages=clsStagesOf(R); computeUnwrap();
+  if(arrowsC.length&&DD.headDirs)arrowsC.forEach((a,h)=>{const d=DD.headDirs[h];
+    a.setDirection(new THREE.Vector3(d[0],d[1],d[2]).normalize());});
+  paint2D(); rebuildSteps(); buildNet();
+  setClsStage(Math.min(clsStage,SC-1)); updateLiveMarker();
+  go(Math.min(stepIdx,STEPS.length-1));
+}
+document.getElementById('mlpBtn').onclick=()=>setModel(!MLP_ON);
+
 camN.position.set(-30,52,120);
+layoutX();rebuildSteps();
 computeUnwrap();paint2D();buildNet();fit();setClsStage(0);updateLiveMarker();go(0);loop();
 </script>
 </body>
