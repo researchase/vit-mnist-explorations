@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LayerNorm Geometry — sphere, stretch, slide</title>
+<script src="three.min.js"></script>
+<style>
+  :root{
+    --bg:#070B12; --panel:#0E1520; --panel-edge:#1C2A3D;
+    --ink:#D8E2EE; --dim:#7A8CA3; --mono:'SF Mono','Cascadia Mono','Consolas',monospace;
+    --gold:#E8B93E; --teal:#35C4A0; --sky:#4DA3E8; --coral:#E8654D; --violet:#9B7FE8;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:'Avenir Next','Segoe UI',system-ui,sans-serif}
+  #scene{position:absolute;inset:0;cursor:grab}
+  #scene:active{cursor:grabbing}
+
+  #hud{position:absolute;top:0;left:0;bottom:0;width:330px;padding:22px 20px;
+    background:linear-gradient(90deg, rgba(7,11,18,.92) 70%, rgba(7,11,18,0));
+    display:flex;flex-direction:column;gap:14px;pointer-events:none;overflow-y:auto}
+  #hud > *{pointer-events:auto}
+
+  h1{font-size:15px;font-weight:600;letter-spacing:.4px}
+  h1 span{color:var(--violet);font-family:var(--mono);font-weight:400}
+  .sub{font-size:11.5px;color:var(--dim);line-height:1.5}
+
+  .steps{display:flex;flex-direction:column;gap:6px}
+  .step{display:flex;gap:10px;align-items:flex-start;text-align:left;
+    background:transparent;border:1px solid transparent;border-radius:8px;
+    padding:8px 10px;color:var(--dim);cursor:pointer;transition:all .18s;
+    font-family:inherit;font-size:12px;line-height:1.4}
+  .step:hover{border-color:var(--panel-edge)}
+  .step.on{background:var(--panel);border-color:var(--panel-edge);color:var(--ink)}
+  .step .op{font-family:var(--mono);font-size:13px;min-width:42px;color:var(--violet)}
+  .step.on .op{color:var(--gold)}
+  .step .cap b{display:block;font-size:12.5px;margin-bottom:1px}
+  .step:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+
+  .row{display:flex;gap:8px;align-items:center}
+  button.ctl{background:var(--panel);border:1px solid var(--panel-edge);color:var(--ink);
+    font-family:inherit;font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer}
+  button.ctl:hover{border-color:var(--violet)}
+  button.ctl:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:20px;
+    border:1px solid var(--panel-edge);background:transparent;cursor:pointer;opacity:.55;transition:all .15s}
+  .chip.on{opacity:1;background:var(--panel)}
+  .chip:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+
+  #math{background:var(--panel);border:1px solid var(--panel-edge);border-radius:10px;
+    padding:12px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.85;color:var(--dim)}
+  #math .t{color:var(--ink);font-size:12px;margin-bottom:2px}
+  #math .v{color:var(--gold)}
+  #math .k{color:var(--sky)}
+
+  #hint{position:absolute;right:16px;bottom:12px;font-size:10.5px;color:var(--dim);
+    font-family:var(--mono);letter-spacing:.3px}
+  @media (max-width:700px){#hud{width:100%;height:auto;bottom:auto;
+    background:linear-gradient(180deg, rgba(7,11,18,.94) 75%, rgba(7,11,18,0))}}
+  @media (prefers-reduced-motion: reduce){.step,.chip,button.ctl{transition:none}}
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<div id="hud">
+  <div>
+    <h1>LayerNorm, geometrically <span>(x−μ)/σ·γ+β</span></h1>
+    <div class="sub">Four 3-component token vectors. Step through what each part of the formula does to them. Drag to orbit, scroll to zoom.</div>
+  </div>
+
+  <div class="steps" id="steps"></div>
+
+  <div class="row">
+    <button class="ctl" id="play">▶ Play all</button>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div id="math"></div>
+</div>
+<div id="hint">drag · orbit&nbsp;&nbsp;scroll · zoom</div>
+
+<script>
+// ---------- data ----------
+const V = [
+  {name:'A', c:0xE8B93E, raw:[ 2.50, 3.10, 2.00]},   // big shared offset, small differences (your resid case)
+  {name:'B', c:0x35C4A0, raw:[-1.65, 1.32, 0.52]},   // your CLS (first 3 dims)
+  {name:'C', c:0x4DA3E8, raw:[ 0.40, 0.70, 0.55]},   // small & cramped
+  {name:'D', c:0xE8654D, raw:[-2.00,-2.60,-1.40]},   // negative offset
+];
+const GAMMA=[1.2,1.4,0.9], BETA=[-0.1,0.15,0.2], R=Math.sqrt(3);
+
+// precompute the 5 stages for each vector
+V.forEach(v=>{
+  const m=(v.raw[0]+v.raw[1]+v.raw[2])/3;
+  const cen=v.raw.map(x=>x-m);
+  const sd=Math.sqrt(cen.reduce((s,x)=>s+x*x,0)/3);
+  const nor=cen.map(x=>x/sd);
+  const gam=nor.map((x,i)=>x*GAMMA[i]);
+  const fin=gam.map((x,i)=>x+BETA[i]);
+  v.mu=m; v.sigma=sd;
+  v.stages=[v.raw,cen,nor,gam,fin];
+});
+
+const STEPS=[
+  {op:'x',    title:'Raw vectors',        cap:'Different lengths, different offsets — the cramped mess LayerNorm receives.'},
+  {op:'−μ',   title:'Subtract the mean',  cap:'Each point slides along the shared (1,1,1) diagonal until it lands on the plane x+y+z = 0. The offset axis is deleted.'},
+  {op:'÷σ',   title:'Divide by std',      cap:'Each point slides radially inside the plane until it reaches the sphere of radius √3. Every vector now has the same length — only direction survives.'},
+  {op:'×γ',   title:'Learned stretch',    cap:'γ = [1.2, 1.4, 0.9] scales each axis. The sphere bends into an ellipsoid — the network amplifies the axes it found useful.'},
+  {op:'+β',   title:'Learned slide',      cap:'β = [−0.1, 0.15, 0.2] translates everything. The ellipsoid parks wherever training decided the next layer wants it.'},
+];
+
+// ---------- three.js scene ----------
+const holder=document.getElementById('scene');
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+holder.appendChild(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x070B12);
+const camera=new THREE.PerspectiveCamera(46,1,.1,100);
+let theta=0.72, phi=1.12, dist=9.2;
+function placeCam(){
+  camera.position.set(dist*Math.sin(phi)*Math.cos(theta), dist*Math.cos(phi), dist*Math.sin(phi)*Math.sin(theta));
+  camera.lookAt(0,0,0);
+}
+scene.add(new THREE.AmbientLight(0xffffff,.75));
+const key=new THREE.DirectionalLight(0xffffff,.6); key.position.set(4,7,5); scene.add(key);
+
+// grid + axes
+const grid=new THREE.GridHelper(8,16,0x1C2A3D,0x101927); grid.position.y=-3.1; scene.add(grid);
+function axis(dir,color){
+  scene.add(new THREE.ArrowHelper(new THREE.Vector3(...dir).normalize(),new THREE.Vector3(0,0,0),3.6,color,.22,.1));
+}
+axis([1,0,0],0x5A6B80); axis([0,1,0],0x5A6B80); axis([0,0,1],0x5A6B80);
+
+// the (1,1,1) diagonal — the "mean direction"
+const diagGeo=new THREE.BufferGeometry().setFromPoints(
+  [new THREE.Vector3(-3.4,-3.4,-3.4), new THREE.Vector3(3.4,3.4,3.4)]);
+const diag=new THREE.Line(diagGeo,new THREE.LineDashedMaterial({color:0x9B7FE8,dashSize:.16,gapSize:.12,transparent:true,opacity:0}));
+diag.computeLineDistances(); scene.add(diag);
+
+// plane x+y+z=0 (disc oriented with normal (1,1,1))
+const plane=new THREE.Mesh(new THREE.CircleGeometry(3.4,64),
+  new THREE.MeshBasicMaterial({color:0x2A4A6A,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false}));
+plane.lookAt(1,1,1); scene.add(plane);
+
+// sphere radius √3  → becomes ellipsoid at ×γ, translated at +β
+const shell=new THREE.Mesh(new THREE.SphereGeometry(R,28,20),
+  new THREE.MeshBasicMaterial({color:0x35C4A0,wireframe:true,transparent:true,opacity:0,depthWrite:false}));
+scene.add(shell);
+
+// the circle where standardized points actually live (sphere ∩ plane)
+const ringPts=[]; for(let i=0;i<=96;i++){const a=i/96*Math.PI*2; ringPts.push(new THREE.Vector3(Math.cos(a)*R,Math.sin(a)*R,0));}
+const ring=new THREE.Line(new THREE.BufferGeometry().setFromPoints(ringPts),
+  new THREE.LineBasicMaterial({color:0xD8E2EE,transparent:true,opacity:0}));
+ring.lookAt(1,1,1); scene.add(ring);
+
+// β arrow
+const betaArrow=new THREE.ArrowHelper(new THREE.Vector3(...BETA).normalize(),new THREE.Vector3(0,0,0),
+  Math.hypot(...BETA)*3,0x9B7FE8,.16,.09);
+betaArrow.line.material.transparent=betaArrow.cone.material.transparent=true;
+betaArrow.line.material.opacity=betaArrow.cone.material.opacity=0; scene.add(betaArrow);
+
+// vector arrows + tips + ghost tips
+V.forEach(v=>{
+  v.arrow=new THREE.ArrowHelper(new THREE.Vector3(1,0,0),new THREE.Vector3(0,0,0),1,v.c,.24,.12);
+  scene.add(v.arrow);
+  v.tip=new THREE.Mesh(new THREE.SphereGeometry(.10,16,12),new THREE.MeshStandardMaterial({color:v.c,emissive:v.c,emissiveIntensity:.45}));
+  scene.add(v.tip);
+  v.ghost=new THREE.Mesh(new THREE.SphereGeometry(.07,12,10),new THREE.MeshBasicMaterial({color:v.c,transparent:true,opacity:.22}));
+  scene.add(v.ghost);
+  v.trailMat=new THREE.LineBasicMaterial({color:v.c,transparent:true,opacity:.3});
+  v.trail=new THREE.Line(new THREE.BufferGeometry(),v.trailMat); scene.add(v.trail);
+});
+
+// ---------- animation state ----------
+let stage=0, from=0, t=1, playing=false, playTimer=null;
+const ease=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+const lerp3=(a,b,k)=>[a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k, a[2]+(b[2]-a[2])*k];
+
+function setStage(s,instant){
+  from=stage; stage=s; t=instant?1:0;
+  document.querySelectorAll('.step').forEach((el,i)=>el.classList.toggle('on',i===s));
+  updateMath();
+}
+
+function fadeTo(mat,target,k){ mat.opacity+= (target-mat.opacity)*k; }
+
+function frame(){
+  requestAnimationFrame(frame);
+  const w=holder.clientWidth,h=holder.clientHeight;
+  if(renderer.domElement.width!==w*renderer.getPixelRatio()){renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();}
+  if(t<1)t=Math.min(1,t+0.016); const k=ease(t);
+
+  V.forEach(v=>{
+    const p=lerp3(v.stages[from],v.stages[stage],k);
+    const vec=new THREE.Vector3(...p), len=Math.max(vec.length(),1e-4);
+    v.arrow.setDirection(vec.clone().normalize()); v.arrow.setLength(len,.22,.11);
+    v.tip.position.copy(vec);
+    const g=new THREE.Vector3(...v.stages[Math.max(stage-1,0)]);
+    v.ghost.position.copy(g); v.ghost.material.opacity = stage>0? .22*k : 0;
+    v.trail.geometry.setFromPoints([g,vec]); v.trailMat.opacity = stage>0? .3*k : 0;
+  });
+
+  // stage-dependent scenery
+  fadeTo(plane.material, stage>=1&&stage<=2? .10:0, .08);
+  fadeTo(diag.material,  stage===1? .8 : stage>=2?.18:0, .08);
+  fadeTo(ring.material,  stage===2? .85:0, .08);
+  fadeTo(shell.material, stage>=2? (stage===2?.28:.2):0, .08);
+  const sTarget = stage>=3? GAMMA:[1,1,1];
+  shell.scale.lerp(new THREE.Vector3(...sTarget), .1);
+  const shTarget = stage>=4? BETA:[0,0,0];
+  shell.position.lerp(new THREE.Vector3(...shTarget), .1);
+  const bo=stage>=4? .9:0;
+  fadeTo(betaArrow.line.material,bo,.08); fadeTo(betaArrow.cone.material,bo,.08);
+
+  placeCam(); renderer.render(scene,camera);
+}
+
+// ---------- UI ----------
+const stepsBox=document.getElementById('steps');
+STEPS.forEach((s,i)=>{
+  const b=document.createElement('button'); b.className='step'; b.setAttribute('aria-label',s.title);
+  b.innerHTML=`<span class="op">${s.op}</span><span class="cap"><b>${s.title}</b>${s.cap}</span>`;
+  b.onclick=()=>{stopPlay(); setStage(i);}
+  stepsBox.appendChild(b);
+});
+
+let sel=1; // selected vector for the math panel (B = your CLS)
+const chipsBox=document.getElementById('chips');
+V.forEach((v,i)=>{
+  const c=document.createElement('button'); c.className='chip'+(i===sel?' on':'');
+  c.textContent=v.name; c.style.color='#'+v.c.toString(16).padStart(6,'0');
+  c.onclick=()=>{sel=i;document.querySelectorAll('.chip').forEach((el,j)=>el.classList.toggle('on',j===i));updateMath();}
+  chipsBox.appendChild(c);
+});
+
+const f=x=>x.toFixed(2).replace('-','−');
+function updateMath(){
+  const v=V[sel], m=document.getElementById('math');
+  const st=v.stages, lines=[
+    `<div class="t">vector ${v.name} at this step</div>`,
+    `<span class="k">x</span> = [${st[0].map(f).join(', ')}]`,
+  ];
+  if(stage>=1) lines.push(`<span class="k">μ</span> = ${f(v.mu)} → x−μ = [${st[1].map(f).join(', ')}]`);
+  if(stage>=2) lines.push(`<span class="k">σ</span> = ${f(v.sigma)} → /σ = [${st[2].map(f).join(', ')}]  <span class="v">‖·‖=√3</span>`);
+  if(stage>=3) lines.push(`<span class="k">×γ</span> [${GAMMA.map(f).join(', ')}] = [${st[3].map(f).join(', ')}]`);
+  if(stage>=4) lines.push(`<span class="k">+β</span> [${BETA.map(f).join(', ')}] = <span class="v">[${st[4].map(f).join(', ')}]</span>`);
+  m.innerHTML=lines.join('<br>');
+}
+
+const playBtn=document.getElementById('play');
+function stopPlay(){playing=false;clearTimeout(playTimer);playBtn.textContent='▶ Play all';}
+playBtn.onclick=()=>{
+  if(playing){stopPlay();return;}
+  playing=true; playBtn.textContent='⏸ Stop'; setStage(0,true);
+  const next=()=>{ if(!playing)return;
+    if(stage<4){ setStage(stage+1); playTimer=setTimeout(next,2100);} else stopPlay(); };
+  playTimer=setTimeout(next,900);
+};
+
+// orbit + zoom
+let drag=false,px=0,py=0;
+holder.addEventListener('pointerdown',e=>{drag=true;px=e.clientX;py=e.clientY;});
+addEventListener('pointerup',()=>drag=false);
+addEventListener('pointermove',e=>{ if(!drag)return;
+  theta+=(e.clientX-px)*.006; phi=Math.min(Math.max(phi-(e.clientY-py)*.006,.25),2.6);
+  px=e.clientX;py=e.clientY;});
+holder.addEventListener('wheel',e=>{e.preventDefault();dist=Math.min(Math.max(dist+e.deltaY*.008,4),18);},{passive:false});
+
+setStage(0,true); frame();
+</script>
+</body>
+</html>

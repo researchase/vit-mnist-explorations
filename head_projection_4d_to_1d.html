@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Head projection — 4-D tokens onto a 1-D line</title>
+<script src="three.min.js"></script>
+<style>
+  :root{
+    --bg:#070B12; --panel:#0E1520; --panel-edge:#1C2A3D;
+    --ink:#D8E2EE; --dim:#7A8CA3; --mono:'SF Mono','Cascadia Mono','Consolas',monospace;
+    --gold:#E8B93E; --violet:#9B7FE8; --sky:#4DA3E8;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:'Avenir Next','Segoe UI',system-ui,sans-serif}
+  #scene{position:absolute;inset:0;cursor:grab}
+  #scene:active{cursor:grabbing}
+  #hud{position:absolute;top:0;left:0;bottom:0;width:340px;padding:22px 20px;
+    background:linear-gradient(90deg, rgba(7,11,18,.92) 70%, rgba(7,11,18,0));
+    display:flex;flex-direction:column;gap:14px;pointer-events:none;overflow-y:auto}
+  #hud > *{pointer-events:auto}
+  h1{font-size:15px;font-weight:600;letter-spacing:.4px}
+  h1 span{color:var(--violet);font-family:var(--mono);font-weight:400}
+  .sub{font-size:11.5px;color:var(--dim);line-height:1.5}
+  .steps{display:flex;flex-direction:column;gap:6px}
+  .step{display:flex;gap:10px;align-items:flex-start;text-align:left;background:transparent;
+    border:1px solid transparent;border-radius:8px;padding:8px 10px;color:var(--dim);
+    cursor:pointer;transition:all .18s;font-family:inherit;font-size:12px;line-height:1.4}
+  .step:hover{border-color:var(--panel-edge)}
+  .step.on{background:var(--panel);border-color:var(--panel-edge);color:var(--ink)}
+  .step .op{font-family:var(--mono);font-size:12px;min-width:46px;color:var(--violet)}
+  .step.on .op{color:var(--gold)}
+  .step .cap b{display:block;font-size:12.5px;margin-bottom:1px}
+  .step:focus-visible,button.ctl:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+  button.ctl{background:var(--panel);border:1px solid var(--panel-edge);color:var(--ink);
+    font-family:inherit;font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;align-self:flex-start}
+  button.ctl:hover{border-color:var(--violet)}
+  #math{background:var(--panel);border:1px solid var(--panel-edge);border-radius:10px;
+    padding:12px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.85;color:var(--dim)}
+  #math .t{color:var(--ink);font-size:12px;margin-bottom:2px}
+  #math .v{color:var(--gold)} #math .k{color:var(--sky)}
+  #legend{display:flex;gap:14px;font-size:11px;color:var(--dim);align-items:center;flex-wrap:wrap}
+  .sw{display:inline-block;width:26px;height:8px;border-radius:4px;vertical-align:middle;
+    background:linear-gradient(90deg,#2F6BC4,#3FBF9E,#E8B93E,#E8654D)}
+  .tw{display:inline-block;width:9px;height:9px;border-radius:50%;background:#fff;
+    outline:2px solid var(--violet);vertical-align:middle}
+  #hint{position:absolute;right:16px;bottom:12px;font-size:10.5px;color:var(--dim);
+    font-family:var(--mono);letter-spacing:.3px}
+  @media (max-width:700px){#hud{width:100%;height:auto;bottom:auto;
+    background:linear-gradient(180deg, rgba(7,11,18,.94) 75%, rgba(7,11,18,0))}}
+  @media (prefers-reduced-motion: reduce){.step,button.ctl{transition:none}}
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div id="hud">
+  <div>
+    <h1>One head's projection <span>s = v·w  (4-D → 1 number)</span></h1>
+    <div class="sub">Tokens are 4-D: position shows dims 1–3, <b>color shows dim 4</b>. The head owns one learned direction w and keeps only each token's shadow on it. Drag to orbit, scroll to zoom.</div>
+  </div>
+  <div class="steps" id="steps"></div>
+  <button class="ctl" id="play">▶ Play all</button>
+  <div id="legend">
+    <span><span class="sw"></span>&nbsp;dim 4 value (low → high)</span>
+    <span><span class="tw"></span>&nbsp;twin pair — differ only in the null space</span>
+  </div>
+  <div id="math"></div>
+</div>
+<div id="hint">drag · orbit&nbsp;&nbsp;scroll · zoom&nbsp;&nbsp;click a token · inspect</div>
+
+<script>
+// ---------- the learned direction (4-D) ----------
+const W=[0.60,0.50,-0.40,0.50];                       // one head's W_v row, say
+const W3=new THREE.Vector3(W[0],W[1],W[2]);
+const D=W3.clone().normalize();                        // drawn line direction in 3-D
+
+// ---------- tokens: two loose clusters + one null-space twin pair ----------
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rnd=mulberry(42), g=()=> (rnd()+rnd()+rnd())/1.5-1;  // ~gaussian-ish in [-1,1]
+
+const P=[];
+const mk=(c,n)=>{for(let i=0;i<n;i++)P.push({v:[c[0]+g()*.55,c[1]+g()*.55,c[2]+g()*.55,c[3]+g()*.45],twin:false});};
+mk([ 1.05, 0.85,-0.55, 0.85],11);      // cluster that scores high
+mk([-0.85,-0.35, 0.60,-0.75],11);      // cluster that scores low
+
+// twin pair: identical shadow, wildly different 4-D positions (difference ⟂ w)
+(function(){
+  const a=[0.25,0.95,0.15,0.35];
+  let u=[0.5,-0.6,0.3,0.2];
+  const uw=u.reduce((s,x,i)=>s+x*W[i],0), ww=W.reduce((s,x)=>s+x*x,0);
+  const nsp=u.map((x,i)=>x-uw/ww*W[i]);                // component of u ⟂ w
+  const b=a.map((x,i)=>x+1.9*nsp[i]);
+  P.push({v:a,twin:true}); P.push({v:b,twin:true});
+})();
+
+// per-token scalars & stage positions
+P.forEach(p=>{
+  p.s3=new THREE.Vector3(p.v[0],p.v[1],p.v[2]).dot(D);        // visible 3-D shadow
+  p.s =p.v.reduce((s,x,i)=>s+x*W[i],0);                        // full 4-D dot product
+  const cloud=new THREE.Vector3(p.v[0],p.v[1],p.v[2]);
+  p.stagePos=[
+    cloud, cloud,                                              // 0 cloud, 1 line appears
+    D.clone().multiplyScalar(p.s3),                            // 2 drop the 3-D shadow
+    D.clone().multiplyScalar(p.s3+p.v[3]*W[3]),                // 3 dim-4 nudge along the line
+    new THREE.Vector3(p.s*1.15,0,0),                           // 4 flatten to a number line
+  ];
+});
+
+const STEPS=[
+ {op:'v',    title:'The token cloud',   cap:'24 tokens straight out of LayerNorm. Position = dims 1–3, color = dim 4. Two loose groups — plus a white twin pair, far apart in space.'},
+ {op:'w',    title:'The learned line',  cap:'One head owns one direction w = [0.60, 0.50, −0.40, 0.50], learned by backprop. Everything this head will ever know is a coordinate along this line.'},
+ {op:'v₃·w₃',title:'Drop the shadows',  cap:'Each token falls perpendicularly onto the line — the visible 3-D part of the dot product. Watch the twins: they land on the same spot. Their difference lives in the null space, and the head is blind to it.'},
+ {op:'+v₄w₄',title:'The hidden nudge',  cap:'The invisible 4th dimension pays its share: each point slides along the line by v₄ × 0.50. Warm points push forward, cool points pull back. The twins still coincide — their dim 4 matched too.'},
+ {op:'s',    title:'One number each',   cap:'The line unrolls into a plain number line: the head\u2019s entire output. 4 numbers became 1. The clusters stayed separated — this head kept what mattered and discarded three dimensions of everything else.'},
+];
+
+// ---------- scene ----------
+const holder=document.getElementById('scene');
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+holder.appendChild(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x070B12);
+const camera=new THREE.PerspectiveCamera(46,1,.1,100);
+let theta=0.75, phi=1.1, dist=8.6;
+function placeCam(){camera.position.set(dist*Math.sin(phi)*Math.cos(theta),
+  dist*Math.cos(phi), dist*Math.sin(phi)*Math.sin(theta)); camera.lookAt(0,0,0);}
+scene.add(new THREE.AmbientLight(0xffffff,.8));
+const key=new THREE.DirectionalLight(0xffffff,.55); key.position.set(4,7,5); scene.add(key);
+const grid=new THREE.GridHelper(8,16,0x1C2A3D,0x101927); grid.position.y=-2.6; scene.add(grid);
+
+// dim-4 color ramp (cool → warm)
+function ramp(t){
+  t=Math.min(Math.max((t+1.4)/2.8,0),1);
+  const stops=[[0x2F,0x6B,0xC4],[0x3F,0xBF,0x9E],[0xE8,0xB9,0x3E],[0xE8,0x65,0x4D]];
+  const x=t*3, i=Math.min(Math.floor(x),2), f=x-i;
+  const c=stops[i].map((a,k)=>a+(stops[i+1][k]-a)*f);
+  return new THREE.Color(c[0]/255,c[1]/255,c[2]/255);
+}
+
+// the head's line (appears at stage 1)
+const lineGeo=new THREE.BufferGeometry().setFromPoints(
+  [D.clone().multiplyScalar(-3.6), D.clone().multiplyScalar(3.6)]);
+const wLine=new THREE.Line(lineGeo,new THREE.LineBasicMaterial({color:0x9B7FE8,transparent:true,opacity:0}));
+scene.add(wLine);
+const wArrow=new THREE.ArrowHelper(D,new THREE.Vector3(0,0,0),2.6,0x9B7FE8,.22,.11);
+wArrow.line.material.transparent=wArrow.cone.material.transparent=true;
+wArrow.line.material.opacity=wArrow.cone.material.opacity=0; scene.add(wArrow);
+
+// number line (stage 4)
+const axGeo=new THREE.BufferGeometry().setFromPoints(
+  [new THREE.Vector3(-3.6,0,0), new THREE.Vector3(3.6,0,0)]);
+const numLine=new THREE.Line(axGeo,new THREE.LineBasicMaterial({color:0xD8E2EE,transparent:true,opacity:0}));
+scene.add(numLine);
+const ticks=new THREE.Group();
+for(let x=-3;x<=3;x++){const tg=new THREE.BufferGeometry().setFromPoints(
+  [new THREE.Vector3(x*1.15,-.09,0),new THREE.Vector3(x*1.15,.09,0)]);
+  ticks.add(new THREE.Line(tg,new THREE.LineBasicMaterial({color:0x7A8CA3,transparent:true,opacity:0})));}
+scene.add(ticks);
+
+// token meshes + drop connectors
+P.forEach(p=>{
+  const col=ramp(p.v[3]);
+  p.mesh=new THREE.Mesh(new THREE.SphereGeometry(p.twin?.13:.105,16,12),
+    new THREE.MeshStandardMaterial({color:p.twin?0xFFFFFF:col,emissive:p.twin?0x9B7FE8:col,
+      emissiveIntensity:p.twin?.6:.35}));
+  scene.add(p.mesh);
+  p.dropMat=new THREE.LineBasicMaterial({color:p.twin?0x9B7FE8:col,transparent:true,opacity:0});
+  p.drop=new THREE.Line(new THREE.BufferGeometry(),p.dropMat); scene.add(p.drop);
+});
+
+// ---------- animation ----------
+let stage=0, from=0, t=1, playing=false, playTimer=null, sel=P.length-2;
+const ease=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+function setStage(s,instant){from=stage;stage=s;t=instant?1:0;
+  document.querySelectorAll('.step').forEach((el,i)=>el.classList.toggle('on',i===s));
+  updateMath();}
+function fadeTo(m,tv,k){m.opacity+=(tv-m.opacity)*k;}
+
+function frame(){
+  requestAnimationFrame(frame);
+  const w=holder.clientWidth,h=holder.clientHeight;
+  if(renderer.domElement.width!==w*renderer.getPixelRatio()){renderer.setSize(w,h);
+    camera.aspect=w/h;camera.updateProjectionMatrix();}
+  if(t<1)t=Math.min(1,t+0.015); const k=ease(t);
+
+  P.forEach(p=>{
+    p.mesh.position.lerpVectors(p.stagePos[from],p.stagePos[stage],k);
+    const showDrop=(stage===2||stage===3);
+    p.drop.geometry.setFromPoints([p.stagePos[0],p.mesh.position]);
+    fadeTo(p.dropMat,showDrop?.28:0,.08);
+  });
+  fadeTo(wLine.material, stage>=1&&stage<4?.85:(stage===4?.15:0),.08);
+  const ao=stage>=1&&stage<4?.9:(stage===4?.15:0);
+  fadeTo(wArrow.line.material,ao,.08); fadeTo(wArrow.cone.material,ao,.08);
+  fadeTo(numLine.material,stage===4?.9:0,.08);
+  ticks.children.forEach(tk=>fadeTo(tk.material,stage===4?.6:0,.08));
+
+  placeCam(); renderer.render(scene,camera);
+}
+
+// ---------- UI ----------
+const stepsBox=document.getElementById('steps');
+STEPS.forEach((s,i)=>{const b=document.createElement('button');b.className='step';
+  b.setAttribute('aria-label',s.title);
+  b.innerHTML=`<span class="op">${s.op}</span><span class="cap"><b>${s.title}</b>${s.cap}</span>`;
+  b.onclick=()=>{stopPlay();setStage(i);};stepsBox.appendChild(b);});
+
+const f=x=>x.toFixed(2).replace('-','−');
+function updateMath(){
+  const p=P[sel],m=document.getElementById('math');
+  const terms=p.v.map((x,i)=>`${f(x)}×${f(W[i])}`).join(' + ');
+  const lines=[`<div class="t">${p.twin?'twin token':'token'} · click any token to inspect</div>`,
+    `<span class="k">v</span> = [${p.v.map(f).join(', ')}]`,
+    `<span class="k">w</span> = [${W.map(f).join(', ')}]`];
+  if(stage>=2)lines.push(`3-D shadow <span class="k">v₃·w₃</span> = ${f(p.s3)}`);
+  if(stage>=3)lines.push(`dim-4 nudge <span class="k">v₄w₄</span> = ${f(p.v[3]*W[3])}`);
+  if(stage>=3)lines.push(`<span class="k">s</span> = ${terms}<br>&nbsp;&nbsp;= <span class="v">${f(p.s)}</span> — all this head keeps`);
+  m.innerHTML=lines.join('<br>');
+}
+
+const playBtn=document.getElementById('play');
+function stopPlay(){playing=false;clearTimeout(playTimer);playBtn.textContent='▶ Play all';}
+playBtn.onclick=()=>{if(playing){stopPlay();return;}
+  playing=true;playBtn.textContent='⏸ Stop';setStage(0,true);
+  const next=()=>{if(!playing)return;
+    if(stage<4){setStage(stage+1);playTimer=setTimeout(next,2200);}else stopPlay();};
+  playTimer=setTimeout(next,900);};
+
+// picking
+const ray=new THREE.Raycaster(),mouse=new THREE.Vector2();let downAt=null;
+holder.addEventListener('pointerdown',e=>{downAt=[e.clientX,e.clientY];});
+holder.addEventListener('pointerup',e=>{
+  if(!downAt||Math.hypot(e.clientX-downAt[0],e.clientY-downAt[1])>5)return;
+  mouse.x=(e.clientX/innerWidth)*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;
+  ray.setFromCamera(mouse,camera);
+  const hit=ray.intersectObjects(P.map(p=>p.mesh));
+  if(hit.length){sel=P.findIndex(p=>p.mesh===hit[0].object);updateMath();}});
+
+// orbit + zoom
+let drag=false,px=0,py=0;
+holder.addEventListener('pointerdown',e=>{drag=true;px=e.clientX;py=e.clientY;});
+addEventListener('pointerup',()=>drag=false);
+addEventListener('pointermove',e=>{if(!drag)return;
+  theta+=(e.clientX-px)*.006;phi=Math.min(Math.max(phi-(e.clientY-py)*.006,.25),2.6);
+  px=e.clientX;py=e.clientY;});
+holder.addEventListener('wheel',e=>{e.preventDefault();
+  dist=Math.min(Math.max(dist+e.deltaY*.008,4),18);},{passive:false});
+
+setStage(0,true);frame();
+</script>
+</body>
+</html>

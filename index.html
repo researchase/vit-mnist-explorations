@@ -44,6 +44,11 @@
   #netTip b{color:var(--gold)}
   .clstick{position:absolute;font-size:9px;pointer-events:none;transform:translate(-50%,-50%);
     text-shadow:0 1px 2px #000;z-index:2;opacity:.85}
+  /* centre-panel tabs */
+  #ctabs{position:absolute;top:5px;right:10px;z-index:7;display:flex;gap:5px}
+  #ctabs button{padding:3px 10px;font-size:11px}
+  .taboverlay{position:absolute;inset:0;z-index:6;display:none;background:var(--bg)}
+  .taboverlay iframe{width:100%;height:100%;border:0;display:block}
   #clsTip{position:fixed;display:none;z-index:30;background:#0b0f14f4;border:1px solid var(--line);
     border-radius:7px;padding:5px 9px;font-size:11.5px;pointer-events:none;box-shadow:0 6px 20px #000c}
   #clsTip .m{font-family:ui-monospace,Menlo,monospace;color:#9fd6ff}
@@ -162,6 +167,13 @@
       Drag to orbit once the camera lands.
     </div>
     <canvas id="netc"></canvas>
+    <div id="ctabs">
+      <button id="ctab_machine" class="on" onclick="switchCenterTab('machine')">machine</button>
+      <button id="ctab_ln" onclick="switchCenterTab('ln')">LayerNorm geometry</button>
+      <button id="ctab_proj" onclick="switchCenterTab('proj')">4D→1D projection</button>
+    </div>
+    <div class="taboverlay" id="tab_ln"><iframe data-src="layernorm_geometry.html" title="LayerNorm geometry"></iframe></div>
+    <div class="taboverlay" id="tab_proj"><iframe data-src="head_projection_4d_to_1d.html" title="4D to 1D head projection"></iframe></div>
   </div>
 
   <div class="divider" id="divR"></div>
@@ -885,7 +897,11 @@ shifted by learned γ and β:</p>
 It costs only 8 weights. Remember this formula — the <em>same</em> operation produces a dramatic
 “explosion” at step 14, for a reason worth waiting for.</p>
 <div class="try"><b>Try:</b> hover an <em>LN</em> cell — the tooltip shows the actual μ and σ
-computed from that token's row, and the γ, β applied.</div>`,
+computed from that token's row, and the γ, β applied.</div>
+<div class="try"><b>Deep dive:</b> what does this <em>look</em> like geometrically? Normalisation
+projects every vector onto a sphere, γ stretches it into an ellipsoid, β slides it —
+<a href="#" onclick="switchCenterTab('ln');return false" style="color:var(--gold)">open the
+“LayerNorm geometry” tab ↗</a> (top-right of the middle panel) for the 3-D animation.</div>`,
 
 ()=>`<h3>Step 6 · Query, Key, Value — every token gets three roles</h3>
 <p>One 12×4 matrix turns each token into three 4-vectors: a <b>query</b> (“what am I looking
@@ -895,7 +911,11 @@ chosen?”). The search-engine metaphor: queries are searched against keys; valu
 are <em>single scalars</em> per token — head h simply owns column h. Four heads = four independent
 one-number lenses on every token.</p>
 <div class="try"><b>Try:</b> hover a <em>Q</em> cell — the full 4-term dot product with real
-numbers, nothing hidden. Columns are heads: Q[·,2] is everything head 2 knows how to ask.</div>`,
+numbers, nothing hidden. Columns are heads: Q[·,2] is everything head 2 knows how to ask.</div>
+<div class="try"><b>Deep dive:</b> that dot product is a <em>projection</em> — each head shines the
+4-D token onto its own 1-D number line, and the shadow's position is the scalar q —
+<a href="#" onclick="switchCenterTab('proj');return false" style="color:var(--gold)">open the
+“4D→1D projection” tab ↗</a> (top-right of the middle panel) to watch it happen in 3-D.</div>`,
 
 ()=>`<h3>Step 7 · Attention — the only place tokens meet</h3>
 <p>Everything so far processed each token separately. Attention is where they compare:</p>
@@ -963,7 +983,10 @@ as step 5… but look at the right panel: the cloud <b>blows apart</b> (variance
 aimed the stretch at exactly the two axes that separate 0/1/2, and squashed the rest. It's not
 noise — it's a learned magnifying glass positioned right before the classifier's eyes.</p>
 <div class="try"><b>Try:</b> flip between steps 12 ↔ 13 watching the right panel — same points,
-one normalisation apart. Hover a <em>CLS·LN</em> cell for the real μ, σ, γ, β.</div>`,
+one normalisation apart. Hover a <em>CLS·LN</em> cell for the real μ, σ, γ, β.</div>
+<div class="try"><b>Deep dive:</b> see the sphere→ellipsoid→slide geometry behind this explosion —
+<a href="#" onclick="switchCenterTab('ln');return false" style="color:var(--gold)">open the
+“LayerNorm geometry” tab ↗</a>.</div>`,
 
 ()=>`<h3>Step 14 · Classification — three dot products</h3>
 <p>The entire image is now <b>4 numbers</b>. Each class scores its match with one dot product:</p>
@@ -1056,6 +1079,19 @@ function rebuildSteps(){
   buildChips();
 }
 setInterval(()=>{if(STEPS[stepIdx]&&STEPS[stepIdx].anim){tick++;applyStepColors();}},110);
+
+/* centre-panel tabs: machine / LayerNorm geometry / 4D->1D projection */
+function switchCenterTab(name){
+  ['ln','proj'].forEach(k=>{
+    const ov=document.getElementById('tab_'+k);
+    const on=(name===k);
+    if(on){const f=ov.querySelector('iframe');
+      if(f&&!f.src)f.src=f.dataset.src;}          // lazy-load on first open
+    ov.style.display=on?'block':'none';
+  });
+  ['machine','ln','proj'].forEach(k=>{
+    document.getElementById('ctab_'+k).classList.toggle('on',name===k);});
+}
 
 /* explanation bubbles */
 document.querySelectorAll('.info').forEach(b=>{
@@ -1269,9 +1305,11 @@ function setModel(on){
   const anchor=Pc(0,0);
   if(arrowsC.length&&DD.headDirs)arrowsC.forEach((a,h)=>{const d=DD.headDirs[h];
     a.position.copy(anchor); a.setDirection(new THREE.Vector3(d[0],d[1],d[2]).normalize());});
-  paint2D(); rebuildSteps(); buildNet();
+  paint2D(); rebuildSteps();
+  stepIdx=Math.min(stepIdx,STEPS.length-1);   // clamp BEFORE buildNet's applyStepColors uses it
+  buildNet();
   setClsStage(Math.min(clsStage,SC-1)); updateLiveMarker();
-  go(Math.min(stepIdx,STEPS.length-1));
+  go(stepIdx);
 }
 document.getElementById('mlpBtn').onclick=()=>setModel(!MLP_ON);
 
