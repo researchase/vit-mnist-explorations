@@ -1,6 +1,8 @@
 MIT License
 
-Copyright (c) 2024 SHUBHAM GARG
+Copyright (c) 2024 SHUBHAM GARG (original Vision-Transformer-VIT-for-MNIST)
+Copyright (c) 2026 Ashwin Venkat (extensions: interpretability studio,
+                                  minimal-model ablations, visual-language translator)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
