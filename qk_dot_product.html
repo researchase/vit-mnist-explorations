@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>q·kᵀ — the dot product, geometrically</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --bg:#070B12; --panel:#0E1520; --panel-edge:#1C2A3D;
+    --ink:#D8E2EE; --dim:#7A8CA3; --mono:'SF Mono','Cascadia Mono','Consolas',monospace;
+    --gold:#E8B93E; --violet:#9B7FE8; --sky:#4DA3E8;
+    --k1:#35C4A0; --k2:#4DA3E8; --k3:#E8654D; --k4:#C77FE8;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:'Avenir Next','Segoe UI',system-ui,sans-serif}
+  #scene{position:absolute;inset:0;cursor:grab}
+  #scene:active{cursor:grabbing}
+  #hud{position:absolute;top:0;left:0;bottom:0;width:348px;padding:22px 20px;
+    background:linear-gradient(90deg, rgba(7,11,18,.93) 72%, rgba(7,11,18,0));
+    display:flex;flex-direction:column;gap:13px;pointer-events:none;overflow-y:auto}
+  #hud > *{pointer-events:auto}
+  h1{font-size:15px;font-weight:600;letter-spacing:.4px}
+  h1 span{color:var(--violet);font-family:var(--mono);font-weight:400}
+  .sub{font-size:11.5px;color:var(--dim);line-height:1.5}
+  .steps{display:flex;flex-direction:column;gap:5px}
+  .step{display:flex;gap:10px;align-items:flex-start;text-align:left;background:transparent;
+    border:1px solid transparent;border-radius:8px;padding:7px 10px;color:var(--dim);
+    cursor:pointer;transition:all .18s;font-family:inherit;font-size:12px;line-height:1.4}
+  .step:hover{border-color:var(--panel-edge)}
+  .step.on{background:var(--panel);border-color:var(--panel-edge);color:var(--ink)}
+  .step .op{font-family:var(--mono);font-size:12px;min-width:52px;color:var(--violet)}
+  .step.on .op{color:var(--gold)}
+  .step .cap b{display:block;font-size:12.5px;margin-bottom:1px}
+  .step:focus-visible,button.ctl:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+  button.ctl{background:var(--panel);border:1px solid var(--panel-edge);color:var(--ink);
+    font-family:inherit;font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;align-self:flex-start}
+  button.ctl:hover{border-color:var(--violet)}
+  #bars{background:var(--panel);border:1px solid var(--panel-edge);border-radius:10px;
+    padding:11px 14px;font-family:var(--mono);font-size:11px}
+  #bars .t{color:var(--ink);font-size:12px;margin-bottom:7px;font-family:'Avenir Next','Segoe UI',system-ui,sans-serif;font-weight:600}
+  .barrow{display:flex;align-items:center;gap:8px;margin:5px 0}
+  .barrow .lbl{width:22px;color:var(--dim)}
+  .barrow .track{flex:1;height:12px;position:relative}
+  .barrow .zero{position:absolute;left:38%;top:-2px;bottom:-2px;width:1px;background:var(--panel-edge)}
+  .barrow .fill{position:absolute;top:1px;height:10px;border-radius:3px;transition:all .7s cubic-bezier(.4,0,.2,1)}
+  .barrow .val{width:46px;text-align:right;color:var(--gold)}
+  #math{background:var(--panel);border:1px solid var(--panel-edge);border-radius:10px;
+    padding:11px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.8;color:var(--dim)}
+  #math .v{color:var(--gold)} #math .k{color:var(--sky)}
+  #math .t{color:var(--ink);font-size:12px;margin-bottom:2px;font-family:'Avenir Next','Segoe UI',system-ui,sans-serif;font-weight:600}
+  #hint{position:absolute;right:16px;bottom:12px;font-size:10.5px;color:var(--dim);
+    font-family:var(--mono);letter-spacing:.3px}
+  @media (max-width:700px){#hud{width:100%;height:auto;bottom:auto;
+    background:linear-gradient(180deg, rgba(7,11,18,.94) 78%, rgba(7,11,18,0))}}
+  @media (prefers-reduced-motion: reduce){.step,button.ctl,.barrow .fill{transition:none}}
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div id="hud">
+  <div>
+    <h1>q·kᵀ, geometrically <span>score = ‖k‖cosθ × ‖q‖</span></h1>
+    <div class="sub">One gold query, four keys. A dot product asks: <i>how much of k points the way q points?</i> Drag to orbit, scroll to zoom, click a key to inspect.</div>
+  </div>
+  <div class="steps" id="steps"></div>
+  <button class="ctl" id="play">▶ Play all</button>
+  <div id="bars"><div class="t" id="barsTitle">scores q·kᵢ</div><div id="barRows"></div></div>
+  <div id="math"></div>
+</div>
+<div id="hint">drag · orbit&nbsp;&nbsp;scroll · zoom&nbsp;&nbsp;click a key · inspect</div>
+
+<script>
+// ---------- vectors ----------
+const Q=[1.4,0.9,0.4];
+const KS=[
+ {n:'k₁',c:0x35C4A0,css:'var(--k1)',v:[ 1.2, 1.0, 0.5]},  // aligned & long → big score
+ {n:'k₂',c:0x4DA3E8,css:'var(--k2)',v:[-0.5, 1.2,-0.9]},  // ~orthogonal → ~zero
+ {n:'k₃',c:0xE8654D,css:'var(--k3)',v:[-1.1,-0.8,-0.3]},  // opposite → negative
+ {n:'k₄',c:0xC77FE8,css:'var(--k4)',v:[ 0.6, 0.4, 0.15]}, // aligned but short → modest
+];
+const qv=new THREE.Vector3(...Q), qlen=qv.length(), qhat=qv.clone().normalize();
+KS.forEach(k=>{
+  k.vec=new THREE.Vector3(...k.v); k.len=k.vec.length();
+  k.dot=k.vec.dot(qv); k.shadow=k.vec.dot(qhat);           // ‖k‖cosθ
+  k.cos=k.dot/(k.len*qlen);
+  k.theta=Math.acos(Math.min(Math.max(k.cos,-1),1))*180/Math.PI;
+});
+const mx=Math.max(...KS.map(k=>k.dot)),
+      sm=KS.map(k=>Math.exp(k.dot-mx)), smSum=sm.reduce((a,b)=>a+b,0),
+      W=sm.map(x=>x/smSum);
+
+const STEPS=[
+ {op:'q, k',   title:'Meet the vectors',  cap:'The gold query q asks a question; four keys answer. Notice k₁ points with q, k₂ sideways, k₃ against, k₄ with q but short.'},
+ {op:'cos θ',  title:'The angle',         cap:'Direction first: the arc to each key shows θ. cos θ is +1 when aligned, 0 at right angles, −1 when opposite. This is the "agreement" part of the score.'},
+ {op:'‖k‖cosθ',title:'Drop the shadow',   cap:'Each key casts its shadow onto q\u2019s axis — length × agreement in one motion. k₂\u2019s shadow nearly vanishes; k₃\u2019s falls behind the origin, negative. k₄ agrees fully but its short arrow buys only a short shadow.'},
+ {op:'×‖q‖',   title:'Scale by the query',cap:'Multiply every shadow by ‖q‖ = 1.71 and you have the scores — the bars on the left are now exactly q·kᵢ, one row of the QKᵀ matrix.'},
+ {op:'softmax',title:'Scores → attention',cap:'Softmax exponentiates and normalizes: negatives shrink toward zero, the leader takes most of the mass, and the row sums to 1. These are the attention weights that will blend the values.'},
+];
+
+// ---------- scene ----------
+const holder=document.getElementById('scene');
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+holder.appendChild(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x070B12);
+const camera=new THREE.PerspectiveCamera(46,1,.1,100);
+let theta=0.85, phi=1.15, dist=7.6;
+function placeCam(){camera.position.set(dist*Math.sin(phi)*Math.cos(theta),
+  dist*Math.cos(phi), dist*Math.sin(phi)*Math.sin(theta)); camera.lookAt(0,.2,0);}
+scene.add(new THREE.AmbientLight(0xffffff,.8));
+const key=new THREE.DirectionalLight(0xffffff,.55); key.position.set(4,7,5); scene.add(key);
+const grid=new THREE.GridHelper(7,14,0x1C2A3D,0x101927); grid.position.y=-2.2; scene.add(grid);
+
+// q axis line (extended, faint) + q arrow
+const qAxis=new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+  [qhat.clone().multiplyScalar(-3.2), qhat.clone().multiplyScalar(3.2)]),
+  new THREE.LineDashedMaterial({color:0xE8B93E,dashSize:.14,gapSize:.11,transparent:true,opacity:0}));
+qAxis.computeLineDistances(); scene.add(qAxis);
+const qArrow=new THREE.ArrowHelper(qhat,new THREE.Vector3(0,0,0),qlen,0xE8B93E,.24,.13);
+scene.add(qArrow);
+
+// key arrows, ghost arrows (that slide to shadows), arcs, drop lines
+function arcPoints(a,b,r){ // slerp arc between unit vectors a,b at radius r
+  const pts=[],ang=a.angleTo(b),ax=new THREE.Vector3().crossVectors(a,b);
+  if(ax.lengthSq()<1e-8)ax.set(0,1,0); ax.normalize();
+  for(let i=0;i<=28;i++){const q=new THREE.Quaternion().setFromAxisAngle(ax,ang*i/28);
+    pts.push(a.clone().applyQuaternion(q).multiplyScalar(r));}
+  return pts;
+}
+KS.forEach((k,i)=>{
+  k.arrow=new THREE.ArrowHelper(k.vec.clone().normalize(),new THREE.Vector3(0,0,0),k.len,k.c,.2,.11);
+  scene.add(k.arrow);
+  // ghost: a sphere that travels from tip to shadow point
+  k.ghost=new THREE.Mesh(new THREE.SphereGeometry(.1,16,12),
+    new THREE.MeshStandardMaterial({color:k.c,emissive:k.c,emissiveIntensity:.5,transparent:true,opacity:0}));
+  scene.add(k.ghost);
+  k.shadowPt=qhat.clone().multiplyScalar(k.shadow);
+  k.dropMat=new THREE.LineBasicMaterial({color:k.c,transparent:true,opacity:0});
+  k.dropLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints([k.vec,k.shadowPt]),k.dropMat);
+  scene.add(k.dropLine);
+  k.shadMat=new THREE.LineBasicMaterial({color:k.c,transparent:true,opacity:0,linewidth:2});
+  k.shadLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+    [new THREE.Vector3(0,0,0),k.shadowPt]),k.shadMat);
+  scene.add(k.shadLine);
+  k.arcMat=new THREE.LineBasicMaterial({color:k.c,transparent:true,opacity:0});
+  k.arc=new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+    arcPoints(qhat,k.vec.clone().normalize(),.62+i*.13)),k.arcMat);
+  scene.add(k.arc);
+});
+
+// ---------- animation ----------
+let stage=0,from=0,t=1,playing=false,playTimer=null,sel=0;
+const ease=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+function setStage(s,instant){from=stage;stage=s;t=instant?1:0;
+  document.querySelectorAll('.step').forEach((el,i)=>el.classList.toggle('on',i===s));
+  updateBars();updateMath();}
+function fadeTo(m,tv,k){m.opacity+=(tv-m.opacity)*k;}
+
+function frame(){
+  requestAnimationFrame(frame);
+  const w=holder.clientWidth,h=holder.clientHeight;
+  if(renderer.domElement.width!==w*renderer.getPixelRatio()){renderer.setSize(w,h);
+    camera.aspect=w/h;camera.updateProjectionMatrix();}
+  if(t<1)t=Math.min(1,t+0.014); const kk=ease(t);
+
+  const ghostOn=stage>=2;
+  KS.forEach(k=>{
+    const a=from>=2?k.shadowPt:k.vec, b=stage>=2?k.shadowPt:k.vec;
+    k.ghost.position.lerpVectors(a,b,kk);
+    fadeTo(k.ghost.material,ghostOn?.95:0,.08);
+    fadeTo(k.dropMat,ghostOn?.3:0,.08);
+    fadeTo(k.shadMat,ghostOn?.9:0,.08);
+    fadeTo(k.arcMat,stage===1?.85:(stage>=2?.15:0),.08);
+    k.dropLine.geometry.setFromPoints([k.vec,k.ghost.position]);
+    k.shadLine.geometry.setFromPoints([new THREE.Vector3(0,0,0),k.ghost.position]);
+    const dimK=stage>=2;
+    k.arrow.line.material.opacity=k.arrow.cone.material.opacity=dimK?.35:1;
+    k.arrow.line.material.transparent=k.arrow.cone.material.transparent=true;
+  });
+  fadeTo(qAxis.material,stage>=2?.5:0,.08);
+  placeCam(); renderer.render(scene,camera);
+}
+
+// ---------- bars ----------
+const rowsBox=document.getElementById('barRows');
+KS.forEach((k,i)=>{
+  const r=document.createElement('div');r.className='barrow';
+  r.innerHTML=`<span class="lbl" style="color:${k.css}">${k.n}</span>
+    <span class="track"><span class="zero"></span><span class="fill" id="fill${i}" style="background:${k.css}"></span></span>
+    <span class="val" id="val${i}">·</span>`;
+  rowsBox.appendChild(r);
+});
+function updateBars(){
+  const title=document.getElementById('barsTitle');
+  title.textContent = stage>=4?'attention weights (sum = 1)': stage>=3?'scores q·kᵢ': stage>=2?'shadows ‖k‖cosθ':'scores appear at step 3';
+  KS.forEach((k,i)=>{
+    const fill=document.getElementById('fill'+i),val=document.getElementById('val'+i);
+    let x=null,maxAbs=3.0;
+    if(stage===2)x=k.shadow; else if(stage===3)x=k.dot; else if(stage>=4)x=W[i];
+    if(x===null){fill.style.width='0';val.textContent='·';return;}
+    if(stage>=4){ // 0..1 from zero line
+      fill.style.left='38%';fill.style.width=(x*58)+'%';
+      val.textContent=x.toFixed(2);
+    }else{
+      const pct=Math.min(Math.abs(x)/maxAbs,1)*(x>=0?58:36);
+      fill.style.left=x>=0?'38%':(38-pct)+'%';fill.style.width=pct+'%';
+      val.textContent=(x>=0?'':'−')+Math.abs(x).toFixed(2);
+    }
+  });
+}
+
+// ---------- math panel ----------
+const f=x=>x.toFixed(2).replace('-','−');
+function updateMath(){
+  const k=KS[sel],m=document.getElementById('math');
+  const terms=Q.map((x,i)=>`${f(x)}×${f(k.v[i])}`).join(' + ');
+  const lines=[`<div class="t">${k.n} · click any key to inspect</div>`,
+    `<span class="k">q</span> = [${Q.map(f).join(', ')}]  ‖q‖ = ${f(qlen)}`,
+    `<span class="k">${k.n}</span> = [${k.v.map(f).join(', ')}]  ‖k‖ = ${f(k.len)}`];
+  if(stage>=1)lines.push(`θ = ${k.theta.toFixed(0)}°  <span class="k">cos θ</span> = ${f(k.cos)}`);
+  if(stage>=2)lines.push(`shadow = ‖k‖cosθ = ${f(k.shadow)}`);
+  if(stage>=3)lines.push(`<span class="k">q·k</span> = ${terms}<br>&nbsp;&nbsp;= ${f(k.shadow)} × ${f(qlen)} = <span class="v">${f(k.dot)}</span>`);
+  if(stage>=4)lines.push(`softmax → weight = <span class="v">${W[sel].toFixed(2)}</span>`);
+  m.innerHTML=lines.join('<br>');
+}
+
+// ---------- UI ----------
+const stepsBox=document.getElementById('steps');
+STEPS.forEach((s,i)=>{const b=document.createElement('button');b.className='step';
+  b.setAttribute('aria-label',s.title);
+  b.innerHTML=`<span class="op">${s.op}</span><span class="cap"><b>${s.title}</b>${s.cap}</span>`;
+  b.onclick=()=>{stopPlay();setStage(i);};stepsBox.appendChild(b);});
+
+const playBtn=document.getElementById('play');
+function stopPlay(){playing=false;clearTimeout(playTimer);playBtn.textContent='▶ Play all';}
+playBtn.onclick=()=>{if(playing){stopPlay();return;}
+  playing=true;playBtn.textContent='⏸ Stop';setStage(0,true);
+  const next=()=>{if(!playing)return;
+    if(stage<4){setStage(stage+1);playTimer=setTimeout(next,2400);}else stopPlay();};
+  playTimer=setTimeout(next,900);};
+
+// picking
+const ray=new THREE.Raycaster(),mouse=new THREE.Vector2();let downAt=null;
+holder.addEventListener('pointerdown',e=>{downAt=[e.clientX,e.clientY];});
+holder.addEventListener('pointerup',e=>{
+  if(!downAt||Math.hypot(e.clientX-downAt[0],e.clientY-downAt[1])>5)return;
+  mouse.x=(e.clientX/innerWidth)*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;
+  ray.setFromCamera(mouse,camera);
+  const meshes=[];KS.forEach((k,i)=>{k.arrow.cone.userData.i=i;k.ghost.userData.i=i;
+    meshes.push(k.arrow.cone,k.ghost);});
+  const hit=ray.intersectObjects(meshes);
+  if(hit.length){sel=hit[0].object.userData.i;updateMath();}});
+
+// orbit + zoom
+let drag=false,px=0,py=0;
+holder.addEventListener('pointerdown',e=>{drag=true;px=e.clientX;py=e.clientY;});
+addEventListener('pointerup',()=>drag=false);
+addEventListener('pointermove',e=>{if(!drag)return;
+  theta+=(e.clientX-px)*.006;phi=Math.min(Math.max(phi-(e.clientY-py)*.006,.25),2.6);
+  px=e.clientX;py=e.clientY;});
+holder.addEventListener('wheel',e=>{e.preventDefault();
+  dist=Math.min(Math.max(dist+e.deltaY*.008,4),16);},{passive:false});
+
+setStage(0,true);frame();
+</script>
+</body>
+</html>

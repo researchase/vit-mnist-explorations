@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>translator journey — english → kannada, dim=8 / 4 heads</title>
+<script src="plotly-2.35.2.min.js"></script>
+<script src="translator_journey_data.js"></script>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; margin: 0 auto;
+         max-width: 1100px; padding: 20px; background: #fafafa; color: #222; }
+  h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 48px; }
+  .note { color: #666; font-size: 13px; max-width: 850px; line-height: 1.45; }
+  .controls { margin: 10px 0; }
+  button { padding: 5px 14px; margin-right: 6px; border: 1px solid #bbb;
+           background: #fff; border-radius: 5px; cursor: pointer; font-size: 13px; }
+  button.on { background: #2b6cb0; color: #fff; border-color: #2b6cb0; }
+  .plot { background: #fff; border: 1px solid #e2e2e2; border-radius: 8px; }
+  .canvases { display: flex; gap: 28px; margin-top: 10px; align-items: center; }
+  .canvases figure { margin: 0; text-align: center; }
+  .canvases figcaption { font-size: 12px; color: #555; margin-top: 4px; }
+  canvas { border: 1px solid #ccc; image-rendering: pixelated; background: #000; }
+  input[type=range] { width: 420px; vertical-align: middle; }
+  .step { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .vgrid { display: grid; grid-template-columns: repeat(8, 26px); gap: 2px;
+           background: #111; padding: 6px; border-radius: 6px; width: max-content; }
+  .vgrid canvas { width: 26px; height: 26px; border: none; }
+  #patchPanel { display: flex; gap: 18px; align-items: center; margin-top: 8px;
+                min-height: 130px; }
+  #patchPanel figure { margin: 0; text-align: center; }
+  #patchPanel figcaption { font-size: 12px; color: #555; margin-top: 3px; }
+</style>
+</head>
+<body>
+<h1>english → kannada translator, inside the 8 dimensions</h1>
+<p class="note">Model: attention-only encoder–decoder, dim=8, 4 heads (each head
+is exactly 2-D), 3,456 params. 8-D spaces are collapsed to 4 by PCA and drawn as
+x, y, z + <b>color = 4th component</b>. Marker symbol = input digit class
+(&#9679; 0, &#9632; 1, &#9670; 2).</p>
+
+<h2>0 · the two languages, side by side</h2>
+<p class="note"><b>Kannada (right)</b> has a real, finite alphabet: the 64
+codebook words the decoder chooses from — these are the gray points of section 3.
+<b>English (left)</b> has no alphabet in this model: the encoder reads raw 4×4
+patches as continuous vectors (an infinite vocabulary). The grid shown is a
+display-only k-means of english patches so you can compare the "letter shapes"
+of the two scripts. Note both are mostly blanks, edges and curve fragments —
+but curved differently.</p>
+<div style="display:flex; gap:40px; flex-wrap:wrap">
+  <figure style="margin:0"><div id="engVocab" class="vgrid"></div>
+    <figcaption class="note">english patch shapes (illustrative)</figcaption></figure>
+  <figure style="margin:0"><div id="kanVocab" class="vgrid"></div>
+    <figcaption class="note">kannada vocabulary — the actual 64 words (hover for id)</figcaption></figure>
+</div>
+
+<h2>1 · encoder: the english sentence, step by step</h2>
+<p class="note">49 patch tokens from 12 test images (4 per class). Watch the same
+tokens at three moments: fresh out of the patch embedding (only ink matters),
+after adding position (the grid unfolds), and after attention (class information
+spreads into the tokens). PCA basis is shared across stages, so movement is real.
+Variance shown: <span id="varEnc"></span>.</p>
+<div class="controls" id="stageBtns"></div>
+<div id="encPlot" class="plot" style="height:560px"></div>
+<div id="patchPanel">
+  <figure><canvas id="srcImg" width="28" height="28" style="width:112px;height:112px"></canvas>
+          <figcaption>source image</figcaption></figure>
+  <figure><canvas id="srcPatch" width="4" height="4" style="width:112px;height:112px"></canvas>
+          <figcaption>this token's patch</figcaption></figure>
+  <span class="note" id="patchInfo">hover a point above to see the actual
+    4×4 patch it represents</span>
+</div>
+
+<h2>2 · inside each head: no collapsing needed</h2>
+<p class="note">dim 8 ÷ 4 heads = 2 dims per head, so each head's world plots
+directly. <b>k</b> = where a token stands to be found, <b>q</b> = what it looks
+for, <b>v</b> = what it hands over if attended to. Color = class. Watch which
+heads separate the classes and which only care about ink/position.</p>
+<div class="controls" id="qkvBtns"></div>
+<div id="headPlot" class="plot" style="height:520px"></div>
+
+<h2>3 · decoder: how the kannada words are formed</h2>
+<p class="note">Gray cloud: the 64 kannada vocabulary words as <i>output
+directions</i> (rows of the final head matrix, PCA→4; marker size = ink of the
+4×4 patch the word paints). Colored path: the decoder's hidden state at each of
+the 49 painting steps (greedy) — the word whose direction it aligns with best is
+the word it says. Ring = word chosen at the current step. Variance:
+<span id="varW"></span>. Toggle to <b>input embeddings</b> to see the decoder's
+<i>other</i> space — the dictionary it reads back from (BOS in red). The two
+arrangements don't match each other, and neither matches pixel similarity:
+the dictionary is organized by <i>usage</i>, not by looks.</p>
+<div class="controls">
+  <span>space:</span><span id="spaceBtns"></span>
+  &nbsp; <span>input:</span>
+  <span id="genBtns"></span>
+  &nbsp;&nbsp; step <span class="step" id="stepLbl">49</span>/49
+  <input type="range" id="stepSlider" min="1" max="49" value="49">
+</div>
+<div id="wordPlot" class="plot" style="height:600px"></div>
+<div class="canvases">
+  <figure><canvas id="canvas0" width="28" height="28" style="width:168px;height:168px"></canvas>
+          <figcaption>canvas so far</figcaption></figure>
+  <figure><canvas id="canvasWord" width="4" height="4" style="width:96px;height:96px"></canvas>
+          <figcaption>word just said</figcaption></figure>
+</div>
+
+<script>
+const TJ = window.TJ;
+const CLASS_COLOR = ["#4e79a7", "#f28e2b", "#e15759"];
+const SYMBOLS = ["circle", "square", "diamond"];
+const axes = t => ({ x: t.map(p => p[0]), y: t.map(p => p[1]),
+                     z: t.map(p => p[2]), c: t.map(p => p[3]) });
+
+function drawGray(canvas, flat, w, h) {
+  const img = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    const v = Math.max(0, Math.min(255, flat[i] * 255));
+    img[i*4] = img[i*4+1] = img[i*4+2] = v; img[i*4+3] = 255;
+  }
+  canvas.getContext("2d").putImageData(new ImageData(img, w, h), 0, 0);
+}
+
+/* ---------- section 0: the two vocabularies ---------- */
+[["engVocab", TJ.engCode, "shape"], ["kanVocab", TJ.codebook, "word"]]
+.forEach(([id, book, label]) => {
+  const grid = document.getElementById(id);
+  book.forEach((patch, j) => {
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 4;
+    cv.title = label + " " + j;
+    drawGray(cv, patch, 4, 4);
+    grid.appendChild(cv);
+  });
+});
+
+function btnRow(el, names, onpick, active = 0) {
+  names.forEach((n, i) => {
+    const b = document.createElement("button");
+    b.textContent = n;
+    if (i === active) b.classList.add("on");
+    b.onclick = () => { el.querySelectorAll("button").forEach(x => x.classList.remove("on"));
+                        b.classList.add("on"); onpick(i); };
+    el.appendChild(b);
+  });
+}
+
+/* ---------- section 1: encoder journey ---------- */
+document.getElementById("varEnc").textContent =
+  TJ.varEnc.map((v,i)=>`PC${i+1} ${(v*100).toFixed(0)}%`).join(" · ");
+function encTraces(stage) {
+  const pts = TJ.stages[stage], a = axes(pts);
+  return [0,1,2].map(cls => {
+    const idx = TJ.meta.map((m,i)=>[m,i]).filter(([m])=>m.cls===cls).map(([,i])=>i);
+    return {
+      type: "scatter3d", mode: "markers", name: "class " + TJ.clsNames[cls],
+      x: idx.map(i=>a.x[i]), y: idx.map(i=>a.y[i]), z: idx.map(i=>a.z[i]),
+      text: idx.map(i => { const m = TJ.meta[i];
+        return `class ${m.cls} · img ${m.img} · patch (${m.r},${m.c}) · ink ${m.ink}`; }),
+      customdata: idx,
+      hoverinfo: "text",
+      marker: { size: 3.5, symbol: SYMBOLS[cls], color: idx.map(i=>a.c[i]),
+                colorscale: "Viridis", cmin: -1.5, cmax: 1.5,
+                colorbar: cls === 0 ? { title: "PC4", len: 0.5 } : undefined,
+                line: { width: 0.5, color: CLASS_COLOR[cls] } }
+    };
+  });
+}
+const encLayout = {
+  margin: {l:0,r:0,t:10,b:0}, showlegend: true,
+  scene: { xaxis:{title:"PC1"}, yaxis:{title:"PC2"}, zaxis:{title:"PC3"} } };
+Plotly.newPlot("encPlot", encTraces(0), encLayout, {displaylogo:false});
+btnRow(document.getElementById("stageBtns"), TJ.stageNames,
+       i => Plotly.react("encPlot", encTraces(i), encLayout).then(hookHover));
+
+function showPatch(mi) {
+  const m = TJ.meta[mi], img = TJ.imgs[m.img];
+  const flat = img.flat();
+  drawGray(document.getElementById("srcImg"), flat, 28, 28);
+  // red frame around the patch on the source image
+  const ctx = document.getElementById("srcImg").getContext("2d");
+  ctx.strokeStyle = "#e11"; ctx.lineWidth = 0.75;
+  ctx.strokeRect(m.c * 4 + 0.4, m.r * 4 + 0.4, 3.4, 3.4);
+  const patch = [];
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++)
+    patch.push(img[m.r * 4 + i][m.c * 4 + j]);
+  drawGray(document.getElementById("srcPatch"), patch, 4, 4);
+  document.getElementById("patchInfo").innerHTML =
+    `class <b>${TJ.clsNames[m.cls]}</b> · image ${m.img} · grid position ` +
+    `(row ${m.r}, col ${m.c}) · ink ${m.ink} — this 4×4 patch of pixels, ` +
+    `flattened to 16 numbers, is what the linear layer turned into this token`;
+}
+function hookHover() {
+  document.getElementById("encPlot").on("plotly_hover",
+    ev => showPatch(ev.points[0].customdata));
+}
+hookHover();
+showPatch(0);
+
+/* ---------- section 2: per-head 2-D ---------- */
+function headTraces(which) {
+  const tr = [];
+  for (let h = 0; h < 4; h++) {
+    const pts = TJ.heads[which][h];
+    for (let cls = 0; cls < 3; cls++) {
+      const idx = TJ.meta.map((m,i)=>[m,i]).filter(([m])=>m.cls===cls).map(([,i])=>i);
+      tr.push({
+        type: "scatter", mode: "markers",
+        xaxis: "x" + (h+1), yaxis: "y" + (h+1),
+        name: "class " + TJ.clsNames[cls], showlegend: h === 0,
+        legendgroup: "c" + cls,
+        x: idx.map(i=>pts[i][0]), y: idx.map(i=>pts[i][1]),
+        text: idx.map(i => { const m = TJ.meta[i];
+          return `class ${m.cls} · patch (${m.r},${m.c}) · ink ${m.ink}`; }),
+        hoverinfo: "text",
+        marker: { size: 4, color: CLASS_COLOR[cls], opacity: 0.65 }
+      });
+    }
+  }
+  return tr;
+}
+const headLayout = {
+  grid: { rows: 2, columns: 2, pattern: "independent" },
+  margin: {l:40,r:10,t:30,b:30},
+  annotations: [0,1,2,3].map(h => ({
+    text: "head " + h, showarrow: false, font: {size: 13},
+    xref: "x" + (h+1) + " domain", yref: "y" + (h+1) + " domain",
+    x: 0.03, y: 0.97 }))
+};
+Plotly.newPlot("headPlot", headTraces("k"), headLayout, {displaylogo:false});
+btnRow(document.getElementById("qkvBtns"), ["k (be found)", "q (look for)", "v (hand over)"],
+       i => Plotly.react("headPlot", headTraces(["k","q","v"][i]), headLayout));
+
+/* ---------- section 3: decoder word space ---------- */
+document.getElementById("varW").textContent =
+  TJ.varW.map((v,i)=>`PC${i+1} ${(v*100).toFixed(0)}%`).join(" · ");
+let genCls = 0, step = 49, space = "out";
+const Wax = axes(TJ.W);
+const Eax = axes(TJ.emb);
+function embTraces() {
+  return [
+    { type: "scatter3d", mode: "markers", name: "dictionary (64 words + BOS)",
+      x: Eax.x.slice(0, 64), y: Eax.y.slice(0, 64), z: Eax.z.slice(0, 64),
+      text: TJ.wordInk.map((k,j)=>`word ${j} · ink ${k}`), hoverinfo: "text",
+      marker: { size: TJ.wordInk.map(k => 3 + 14*k), color: Eax.c.slice(0, 64),
+                colorscale: "Viridis", cmin: -1, cmax: 1, opacity: 0.55,
+                colorbar: { title: "PC4", len: 0.5 } } },
+    { type: "scatter3d", mode: "markers", name: "BOS (start of sentence)",
+      x: [Eax.x[64]], y: [Eax.y[64]], z: [Eax.z[64]],
+      hoverinfo: "text", text: ["BOS"],
+      marker: { size: 9, symbol: "diamond", color: "#e11" } }
+  ];
+}
+function wordTraces() {
+  if (space === "in") return embTraces();
+  const traj = TJ.gen.traj[genCls].slice(0, step), ta = axes(traj);
+  const cur = TJ.gen.tokens[genCls][step - 1];
+  return [
+    { type: "scatter3d", mode: "markers", name: "vocabulary (64 words)",
+      x: Wax.x, y: Wax.y, z: Wax.z,
+      text: TJ.wordInk.map((k,j)=>`word ${j} · ink ${k}`), hoverinfo: "text",
+      marker: { size: TJ.wordInk.map(k => 3 + 14*k), color: Wax.c,
+                colorscale: "Viridis", cmin: -1, cmax: 1, opacity: 0.55,
+                colorbar: { title: "PC4", len: 0.5 } } },
+    { type: "scatter3d", mode: "lines+markers",
+      name: "decoder state (marker = ink of word said)",
+      x: ta.x, y: ta.y, z: ta.z,
+      text: traj.map((_,t)=>`step ${t+1} → says word ${TJ.gen.tokens[genCls][t]}` +
+        ` (ink ${TJ.wordInk[TJ.gen.tokens[genCls][t]]})`),
+      hoverinfo: "text",
+      line: { color: CLASS_COLOR[genCls], width: 3 },
+      marker: { size: traj.map((_,t)=> t===step-1 ? 8 : 4.5),
+                color: traj.map((_,t)=>TJ.wordInk[TJ.gen.tokens[genCls][t]]),
+                colorscale: [[0, "#222"], [0.15, "#666"], [1, "#ffdf00"]],
+                cmin: 0, cmax: 0.45 } },
+    { type: "scatter3d", mode: "markers", name: "word chosen now",
+      x: [Wax.x[cur]], y: [Wax.y[cur]], z: [Wax.z[cur]],
+      hoverinfo: "text", text: ["word " + cur],
+      marker: { size: 11, symbol: "circle-open", color: "#111",
+                line: { width: 3 } } }
+  ];
+}
+const wordLayout = {
+  margin: {l:0,r:0,t:10,b:0}, showlegend: true,
+  scene: { xaxis:{title:"PC1"}, yaxis:{title:"PC2"}, zaxis:{title:"PC3"} } };
+Plotly.newPlot("wordPlot", wordTraces(), wordLayout, {displaylogo:false});
+
+function drawCanvas() {
+  const toks = TJ.gen.tokens[genCls];
+  const img = new Uint8ClampedArray(28 * 28 * 4);
+  for (let p = 0; p < step; p++) {
+    const patch = TJ.codebook[toks[p]], pr = Math.floor(p / 7), pc = p % 7;
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      const v = Math.max(0, Math.min(255, patch[i * 4 + j] * 255));
+      const o = ((pr * 4 + i) * 28 + pc * 4 + j) * 4;
+      img[o] = img[o+1] = img[o+2] = v; img[o+3] = 255;
+    }
+  }
+  const ctx = document.getElementById("canvas0").getContext("2d");
+  ctx.clearRect(0,0,28,28);
+  ctx.putImageData(new ImageData(img, 28, 28), 0, 0);
+  const wp = TJ.codebook[toks[step - 1]];
+  const wimg = new Uint8ClampedArray(4 * 4 * 4);
+  for (let i = 0; i < 16; i++) {
+    const v = Math.max(0, Math.min(255, wp[i] * 255));
+    wimg[i*4] = wimg[i*4+1] = wimg[i*4+2] = v; wimg[i*4+3] = 255;
+  }
+  document.getElementById("canvasWord").getContext("2d")
+    .putImageData(new ImageData(wimg, 4, 4), 0, 0);
+}
+function refresh() {
+  document.getElementById("stepLbl").textContent = step;
+  Plotly.react("wordPlot", wordTraces(), wordLayout);
+  drawCanvas();
+}
+btnRow(document.getElementById("genBtns"),
+       TJ.clsNames.map(n => "english " + n), i => { genCls = i; refresh(); });
+btnRow(document.getElementById("spaceBtns"),
+       ["output directions (+ trajectory)", "input embeddings (dictionary)"],
+       i => { space = i === 0 ? "out" : "in"; refresh(); });
+document.getElementById("stepSlider").oninput = e => { step = +e.target.value; refresh(); };
+refresh();
+</script>
+</body>
+</html>

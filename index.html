@@ -171,9 +171,11 @@
       <button id="ctab_machine" class="on" onclick="switchCenterTab('machine')">machine</button>
       <button id="ctab_ln" onclick="switchCenterTab('ln')">LayerNorm geometry</button>
       <button id="ctab_proj" onclick="switchCenterTab('proj')">4D→1D projection</button>
+      <button id="ctab_qk" onclick="switchCenterTab('qk')">q·kᵀ dot product</button>
     </div>
     <div class="taboverlay" id="tab_ln"><iframe data-src="layernorm_geometry.html" title="LayerNorm geometry"></iframe></div>
     <div class="taboverlay" id="tab_proj"><iframe data-src="head_projection_4d_to_1d.html" title="4D to 1D head projection"></iframe></div>
+    <div class="taboverlay" id="tab_qk"><iframe data-src="qk_dot_product.html" title="q·kᵀ dot product, geometrically"></iframe></div>
   </div>
 
   <div class="divider" id="divR"></div>
@@ -1082,14 +1084,14 @@ setInterval(()=>{if(STEPS[stepIdx]&&STEPS[stepIdx].anim){tick++;applyStepColors(
 
 /* centre-panel tabs: machine / LayerNorm geometry / 4D->1D projection */
 function switchCenterTab(name){
-  ['ln','proj'].forEach(k=>{
+  ['ln','proj','qk'].forEach(k=>{
     const ov=document.getElementById('tab_'+k);
     const on=(name===k);
     if(on){const f=ov.querySelector('iframe');
       if(f&&!f.src)f.src=f.dataset.src;}          // lazy-load on first open
     ov.style.display=on?'block':'none';
   });
-  ['machine','ln','proj'].forEach(k=>{
+  ['machine','ln','proj','qk'].forEach(k=>{
     document.getElementById('ctab_'+k).classList.toggle('on',name===k);});
 }
 
